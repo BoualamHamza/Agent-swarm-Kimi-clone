@@ -1,0 +1,17 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+dist/
+build/
+.DS:_Store
+.claude/*
+.claude/
+agent_swarm.jsx
+agent-swarm-documentation.md
