@@ -1,24 +1,31 @@
 """Tool schemas (OpenAI function-calling format) and the executor.
 
-Six tools are available to every worker agent:
+Seven tools are available to every worker agent:
   - calculate            (sandboxed math via asteval)
   - get_current_date
   - write_to_shared_memory / read_shared_memory   (the swarm communication backbone)
   - request_handoff      (dynamic specialist spawn)
   - web_search           (Tavily)
+  - run_python           (E2B cloud sandbox — kernel state persists per worker)
 
 The executor returns a string — OpenAI requires `tool` message content to be a string.
 """
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime
 from typing import Any
 
 from asteval import Interpreter
+from e2b import SandboxException, TimeoutException
+from e2b_code_interpreter import AsyncSandbox
 from langsmith import traceable
 
 from app.client import get_tavily
+from app.memory import SharedMemoryStore
+
+logger = logging.getLogger(__name__)
 
 # ─── Schemas (OpenAI function-calling format) ────────────────────────────────
 
@@ -108,6 +115,26 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_python",
+            "description": (
+                "Execute Python code in a secure E2B cloud sandbox. Returns stdout, stderr, "
+                "and the value of the last expression. Variables, imports, and files persist "
+                "across calls within this worker. Use for data analysis, plotting, file "
+                "processing, or any computation that exceeds calculate's reach."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code":    {"type": "string",  "description": "Python source to run"},
+                    "timeout": {"type": "integer", "description": "Per-call timeout in seconds (1-120, default 30)", "default": 30},
+                },
+                "required": ["code"],
+            },
+        },
+    },
 ]
 
 
@@ -117,11 +144,23 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
 class ToolExecutor:
     """Stateful executor — holds shared memory, the write lock, and the asteval interpreter."""
 
-    def __init__(self, shared_memory: dict[str, str], lock: asyncio.Lock):
+    def __init__(
+        self,
+        shared_memory: dict[str, str],
+        lock: asyncio.Lock,
+        *,
+        store: SharedMemoryStore | None = None,
+        session_id: str | None = None,
+    ):
         self.shared_memory = shared_memory
         self.lock = lock
+        # When both are set, write_to_shared_memory persists through to the store.
+        self.store = store
+        self.session_id = session_id
         # asteval is sandboxed: no imports, no exec, no attribute access.
         self._asteval = Interpreter(minimal=False, no_print=True)
+        # E2B sandbox is lazy-created on first run_python call, killed in close().
+        self._sandbox: AsyncSandbox | None = None
 
     @traceable(run_type="tool")
     async def execute(self, name: str, args: dict[str, Any]) -> str:
@@ -140,6 +179,8 @@ class ToolExecutor:
                 return f'Handoff to "{args.get("to_role", "?")}" registered.'
             if name == "web_search":
                 return await self._web_search(args.get("query", ""), int(args.get("max_results", 5)))
+            if name == "run_python":
+                return await self._run_python(args.get("code", ""), int(args.get("timeout", 30)))
             return f"Unknown tool: {name}"
         except Exception as e:  # surface tool errors as text — workers can recover
             return f"Error in {name}: {type(e).__name__}: {e}"
@@ -161,6 +202,17 @@ class ToolExecutor:
             return "Error: key is required"
         async with self.lock:
             self.shared_memory[key] = value
+        if self.store is not None and self.session_id is not None:
+            try:
+                await self.store.put(self.session_id, key, value)
+            except Exception as e:
+                # Don't surface store failures as tool errors — the agent's
+                # finding is already in the in-process cache and visible to
+                # the rest of the swarm. Persistence is best-effort.
+                logger.warning(
+                    "memory store write failed (session=%s, key=%r): %s",
+                    self.session_id, key, e,
+                )
         return f'Stored under key "{key}".'
 
     def _read_memory(self, key: str) -> str:
@@ -169,6 +221,40 @@ class ToolExecutor:
                 return "(shared memory is empty)"
             return "\n".join(f"[{k}]: {v}" for k, v in self.shared_memory.items())
         return self.shared_memory.get(key, f'Nothing found for key "{key}".')
+
+    async def _run_python(self, code: str, timeout: int) -> str:
+        if not code.strip():
+            return "Error: empty code"
+        timeout = max(1, min(120, timeout))
+        if self._sandbox is None:
+            self._sandbox = await AsyncSandbox.create()
+        sandbox = self._sandbox
+        try:
+            execution = await sandbox.run_code(code, timeout=timeout)
+        except TimeoutException:
+            return f"Error: execution exceeded {timeout}s timeout"
+        except SandboxException as e:
+            return f"Error: sandbox failure: {e}"
+
+        parts: list[str] = []
+        if execution.logs.stdout:
+            parts.append("stdout:\n" + "".join(execution.logs.stdout).rstrip())
+        if execution.logs.stderr:
+            parts.append("stderr:\n" + "".join(execution.logs.stderr).rstrip())
+        if execution.error:
+            parts.append(
+                f"error: {execution.error.name}: {execution.error.value}\n"
+                f"{execution.error.traceback}"
+            )
+        if execution.text:
+            parts.append(f"result: {execution.text}")
+        return "\n\n".join(parts) if parts else "(no output)"
+
+    async def close(self) -> None:
+        """Release the E2B sandbox if one was created. Idempotent."""
+        if self._sandbox is not None:
+            sandbox, self._sandbox = self._sandbox, None
+            await sandbox.kill()
 
     async def _web_search(self, query: str, max_results: int) -> str:
         if not query.strip():

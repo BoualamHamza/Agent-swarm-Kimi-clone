@@ -11,6 +11,7 @@ import asyncio
 from langsmith import traceable
 
 from app.loop import EventEmitter, tool_use_loop
+from app.memory import SharedMemoryStore
 from app.models import MODELS
 from app.state import AgentSpec, Handoff, WorkerResult
 from app.tools import TOOL_SCHEMAS
@@ -35,6 +36,7 @@ Tool usage:
 - Use calculate for any numeric reasoning.
 - Use get_current_date if temporal context matters.
 - Use web_search for current information only — do NOT search for things you can reason about.
+- Use run_python for analysis, plotting, file processing, or any computation that exceeds calculate's reach. Variables and imports persist across calls within your session; keep individual cells small to stay under the 30s timeout.
 - Use request_handoff ONLY if you discover work needing a genuinely different specialist.
 
 Your final text response is your result — write it clearly and structured for synthesis. Do not end with another tool call when your investigation is done."""
@@ -67,6 +69,8 @@ async def run_worker(
     lock: asyncio.Lock,
     on_event: EventEmitter | None = None,
     model: str | None = None,
+    store: SharedMemoryStore | None = None,
+    session_id: str | None = None,
 ) -> WorkerResult:
     outcome = await tool_use_loop(
         agent_id=spec.id,
@@ -77,6 +81,8 @@ async def run_worker(
         shared_memory=shared_memory,
         lock=lock,
         on_event=on_event,
+        store=store,
+        session_id=session_id,
     )
     return WorkerResult(
         spec=spec,
@@ -99,6 +105,8 @@ async def run_handoff_worker(
     lock: asyncio.Lock,
     on_event: EventEmitter | None = None,
     model: str | None = None,
+    store: SharedMemoryStore | None = None,
+    session_id: str | None = None,
 ) -> WorkerResult:
     outcome = await tool_use_loop(
         agent_id=spec.id,
@@ -109,6 +117,8 @@ async def run_handoff_worker(
         shared_memory=shared_memory,
         lock=lock,
         on_event=on_event,
+        store=store,
+        session_id=session_id,
     )
     return WorkerResult(
         spec=spec,

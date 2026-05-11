@@ -4,6 +4,7 @@ from __future__ import annotations
 import pytest
 
 from app.client import get_openrouter, get_tavily
+from app.memory import get_store
 
 
 @pytest.fixture(autouse=True)
@@ -18,4 +19,5 @@ def _env(monkeypatch):
     # Reset the lru_cache singletons between tests
     get_openrouter.cache_clear()
     get_tavily.cache_clear()
+    get_store.cache_clear()
     yield

@@ -152,6 +152,64 @@ async def test_loop_detects_length_truncation():
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_loop_forwards_store_and_session_id_to_executor(monkeypatch):
+    """tool_use_loop must thread store/session_id through to ToolExecutor so memory writes persist."""
+    from app.memory import InMemoryStore
+
+    captured: dict[str, object] = {}
+
+    from app.tools import ToolExecutor as RealExecutor
+
+    class CapturingExecutor(RealExecutor):
+        def __init__(self, *args, **kwargs):
+            captured["store"] = kwargs.get("store")
+            captured["session_id"] = kwargs.get("session_id")
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr("app.loop.ToolExecutor", CapturingExecutor)
+
+    respx.post(OPENROUTER).mock(return_value=httpx.Response(
+        200, json=_completion(content="ok", finish="stop")
+    ))
+
+    store = InMemoryStore()
+    await tool_use_loop(
+        agent_id="a1", model="x/y", system="sys", user="hi",
+        tools=TOOL_SCHEMAS, shared_memory={}, lock=asyncio.Lock(),
+        store=store, session_id="session-X",
+    )
+    assert captured["store"] is store
+    assert captured["session_id"] == "session-X"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_loop_closes_executor(monkeypatch):
+    """tool_use_loop must call executor.close() so sandbox resources are released."""
+    from app.tools import ToolExecutor as RealExecutor
+
+    closed = {"count": 0}
+
+    class TrackingExecutor(RealExecutor):
+        async def close(self) -> None:
+            closed["count"] += 1
+            await super().close()
+
+    monkeypatch.setattr("app.loop.ToolExecutor", TrackingExecutor)
+
+    respx.post(OPENROUTER).mock(return_value=httpx.Response(
+        200, json=_completion(content="Done.", finish="stop")
+    ))
+
+    await tool_use_loop(
+        agent_id="a1", model="x/y", system="sys", user="hi",
+        tools=TOOL_SCHEMAS, shared_memory={}, lock=asyncio.Lock(),
+    )
+    assert closed["count"] == 1
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_loop_detects_empty_content_with_stop():
     # Model says "stop" but produced no content — surface as `empty`, not silently `ok`.
     respx.post(OPENROUTER).mock(return_value=httpx.Response(

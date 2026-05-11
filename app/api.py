@@ -25,6 +25,11 @@ app = FastAPI(title="Agent Swarm", version="0.1.0")
 
 class RunRequest(BaseModel):
     task: str = Field(min_length=1, max_length=2000)
+    session_id: str | None = Field(
+        default=None,
+        max_length=128,
+        description="Reuse a session_id across requests to share memory between runs.",
+    )
 
 
 @app.get("/health")
@@ -35,7 +40,7 @@ async def health() -> dict:
 @app.post("/run")
 async def run(req: RunRequest) -> EventSourceResponse:
     async def event_stream() -> AsyncIterator[dict]:
-        async for evt in run_swarm(req.task):
+        async for evt in run_swarm(req.task, session_id=req.session_id):
             yield {
                 "event": evt.type,
                 "data": evt.model_dump_json(),
@@ -51,6 +56,6 @@ async def run_collect(req: RunRequest) -> dict:
     Useful for quick smoke tests when you don't want to deal with SSE parsing.
     """
     events: list[dict] = []
-    async for evt in run_swarm(req.task):
+    async for evt in run_swarm(req.task, session_id=req.session_id):
         events.append(json.loads(evt.model_dump_json()))
     return {"events": events}

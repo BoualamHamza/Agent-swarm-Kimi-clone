@@ -14,11 +14,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from typing import AsyncIterator
 
 from langsmith import traceable
 
 from app.aggregator import aggregate
+from app.memory import SharedMemoryStore, get_store
 from app.orchestrator import orchestrate
 from app.state import (
     AgentComplete,
@@ -41,11 +43,22 @@ CONCURRENCY = 4
 
 
 @traceable(name="run_swarm", run_type="chain")
-async def run_swarm(task: str) -> AsyncIterator[SwarmEvent]:  # type: ignore[misc]
+async def run_swarm(  # type: ignore[misc]
+    task: str,
+    *,
+    session_id: str | None = None,
+    store: SharedMemoryStore | None = None,
+) -> AsyncIterator[SwarmEvent]:
     """Run a full swarm and yield events as they happen.
+
+    `session_id` namespaces the shared memory; reusing one across runs preserves
+    findings (when the configured store is persistent). If omitted, an ephemeral
+    id is generated. `store` defaults to the process-wide store from `get_store()`.
 
     NOTE: @traceable wraps async generators correctly in langsmith>=0.3.
     """
+    store = store or get_store()
+    session_id = session_id or f"ephemeral-{uuid.uuid4().hex[:8]}"
     try:
         # ─── Phase 1 — Orchestrate ───────────────────────────────────────────
         yield PhaseStart(phase="orchestrating")
@@ -58,7 +71,9 @@ async def run_swarm(task: str) -> AsyncIterator[SwarmEvent]:  # type: ignore[mis
         yield PhaseStart(phase="executing")
 
         sem = asyncio.Semaphore(CONCURRENCY)
-        shared_memory: dict[str, str] = {}
+        # Hydrate from the persistent store so prior findings in this session
+        # are visible to all agents from the start.
+        shared_memory: dict[str, str] = await store.get_all(session_id)
         lock = asyncio.Lock()
         queue: asyncio.Queue[SwarmEvent | None] = asyncio.Queue()
 
@@ -73,6 +88,8 @@ async def run_swarm(task: str) -> AsyncIterator[SwarmEvent]:  # type: ignore[mis
                         shared_memory=shared_memory,
                         lock=lock,
                         on_event=queue.put,
+                        store=store,
+                        session_id=session_id,
                     )
                 except Exception as e:
                     # Contain per-worker failures (e.g. RateLimitError after retries
@@ -141,6 +158,8 @@ async def run_swarm(task: str) -> AsyncIterator[SwarmEvent]:  # type: ignore[mis
                     shared_memory=shared_memory,
                     lock=lock,
                     on_event=queue.put,
+                    store=store,
+                    session_id=session_id,
                 )
                 # Drain any events the handoff worker queued
                 while not queue.empty():
