@@ -89,3 +89,42 @@ A **key-value store** visible to all agents simultaneously. Any agent can write 
 A final LLM call (no tools) that receives all worker and handoff results plus the shared memory dump, and synthesizes them into a single coherent answer.
 
 ---
+
+## 3. The TUI — `agent-swarm`
+
+A Textual-based terminal UI ships as the primary user-facing entry point. Like Claude Code but for swarms: type a task, watch a roster of named pixel-art agents spawn, call tools, write to shared memory, hand off to specialists, and produce a final answer.
+
+```bash
+pip install -e .
+agent-swarm              # interactive — type a task, swarm runs in-process
+agent-swarm --demo       # scripted demo, no API keys required
+```
+
+Each worker is assigned a stable Character at spawn from a curated pool (Hemingway, Cyclops, Hypatia, Riemann, Heisenberg, Shannon, Ada, …) — the orchestrator's functional name (`MarketAnalyst`, `TechArchitect`) is preserved in tooltips and the underlying `AgentSpec`. The display layer is purely cosmetic; the swarm runtime is untouched.
+
+**Layout**
+
+- **Left pane** — task, orchestrator thinking, per-agent progress roster, final answer.
+- **Right pane** — the "Swarm Computer": phase indicator, agent grid with portraits, live shared-memory drawer.
+- **Bottom** — input bar for the next task; `q` to quit.
+
+**What you see in motion**
+
+- Avatars appear with each `AgentSpawned`; border glow turns on at `AgentRunning`.
+- Speech bubbles flash above an avatar on every `tool_call` (🔍 web_search, 🧮 calculate, 🐍 run_python, 💾 write_to_shared_memory, 📖 read_shared_memory, 📅 get_current_date, 🔄 request_handoff).
+- The memory drawer upserts and flashes on every `memory_write`.
+- Handoffs from Phase 3 annotate both cards with arrow labels (`↦ Hermes`, `← Cyclops`).
+- The chat pane types out the synthesized answer on `final_result`.
+
+**Source map** (under `app/tui/`)
+
+| File | Role |
+|---|---|
+| `main.py` | `SwarmApp(App)` + the `agent-swarm` CLI entry |
+| `event_router.py` | `SwarmEvent` → widget dispatch |
+| `avatars.py` | `Character` + `AvatarPool` + ~28 portraits |
+| `demo.py` | Scripted event stream for `--demo` |
+| `styles.tcss` | Layout, colors, glow class |
+| `widgets/` | `AgentGrid`, `AgentCard`, `MemoryDrawer`, `ChatPane`, `SwarmComputer`, `InputBar` |
+
+---
