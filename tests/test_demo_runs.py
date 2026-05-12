@@ -29,3 +29,11 @@ async def test_demo_runs_to_completion():
     src_card = app.swarm_computer.grid.get_card("a2")
     assert src_card is not None
     assert src_card.role.startswith("↦")
+    # Demo emits two scripted artifacts at the end of the run; they're
+    # surfaced in the right-pane Artifacts tab.
+    view = app.swarm_computer.artifacts_view
+    assert len(view._rows) == 2
+    titles = {ev.title for ev in view._rows}
+    assert titles == {"benchmark", "summary"}
+    # After artifacts arrive the right pane auto-switches to the artifacts tab.
+    assert app.swarm_computer._tabs.active == "tab-artifacts"

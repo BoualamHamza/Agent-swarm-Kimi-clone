@@ -13,12 +13,15 @@ from __future__ import annotations
 import asyncio
 from typing import AsyncIterator
 
+from pathlib import Path
+
 from app.state import (
     AgentComplete,
     AgentHandedOff,
     AgentRunning,
     AgentSpawned,
     AgentSpec,
+    ArtifactEmitted,
     FinalResult,
     Handoff,
     HandoffRequested,
@@ -212,4 +215,53 @@ async def scripted_events() -> AsyncIterator[SwarmEvent]:
     )
     yield FinalResult(text=final_text, agents_total=5, handoffs_total=1, memory_entries=4)
     await asyncio.sleep(_FAST)
+
+    # ─── Phase 4.5 — Artifacts (scripted) ───────────────────────────────────
+    # Write tiny demo files locally so the artifact preview pane has real
+    # content to display when the user switches to the Artifacts tab.
+    demo_dir = Path.home() / ".agent-swarm" / "artifacts" / "demo"
+    demo_dir.mkdir(parents=True, exist_ok=True)
+
+    csv_path = demo_dir / "benchmark.csv"
+    csv_bytes = (
+        b"problem_id,domain,difficulty,answer\n"
+        b"Q1,arithmetic,easy,55\n"
+        b"Q2,geometry,medium,153.94\n"
+        b"Q3,algebra,easy,4\n"
+        b"Q4,algebra,medium,12\n"
+        b"Q5,calculus,hard,8\n"
+    )
+    csv_path.write_bytes(csv_bytes)
+
+    md_path = demo_dir / "summary.md"
+    md_bytes = (
+        b"# Math Word-Problem Benchmark\n\n"
+        b"15 problems across arithmetic, algebra, geometry, and calculus.\n\n"
+        b"## Coverage\n\n"
+        b"- Arithmetic: 5 problems\n"
+        b"- Algebra: 5 problems (1 deferred to calculus specialist)\n"
+        b"- Geometry: 5 problems\n\n"
+        b"Each problem includes a step-by-step solution.\n"
+    )
+    md_path.write_bytes(md_bytes)
+
+    yield ArtifactEmitted(
+        identifier="demo/benchmark.csv",
+        title="benchmark",
+        mime_type="text/csv",
+        local_path=str(csv_path),
+        sandbox_path="/home/user/workspace/artifacts/benchmark.csv",
+        size_bytes=len(csv_bytes),
+    )
+    await asyncio.sleep(_FAST)
+    yield ArtifactEmitted(
+        identifier="demo/summary.md",
+        title="summary",
+        mime_type="text/markdown",
+        local_path=str(md_path),
+        sandbox_path="/home/user/workspace/artifacts/summary.md",
+        size_bytes=len(md_bytes),
+    )
+    await asyncio.sleep(_FAST)
+
     yield PhaseStart(phase="complete")

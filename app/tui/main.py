@@ -30,7 +30,15 @@ class SwarmApp(App):
     BINDINGS = [
         ("q", "quit", "Quit"),
         ("ctrl+c", "quit", "Quit"),
+        ("f1", "show_computer", "Computer"),
+        ("f2", "show_artifacts", "Artifacts"),
     ]
+
+    def action_show_computer(self) -> None:
+        self.swarm_computer.show_computer()
+
+    def action_show_artifacts(self) -> None:
+        self.swarm_computer.show_artifacts()
 
     def __init__(self, *, demo: bool = False) -> None:
         super().__init__()

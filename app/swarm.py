@@ -9,12 +9,21 @@ Concurrency model:
 
 Phase 3 (handoffs) runs sequentially — handoff agents typically depend on prior
 work and there are usually only one or two of them.
+
+A single E2B SwarmSandbox is created once orchestration succeeds and shared
+across every worker + handoff agent in this run. After aggregation, any file
+saved under ``/home/user/workspace/artifacts/`` is downloaded to
+``~/.agent-swarm/artifacts/{session_id}/`` and surfaced as an
+``ArtifactEmitted`` event.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import mimetypes
+import os
 import uuid
+from pathlib import Path
 from typing import AsyncIterator
 
 from langsmith import traceable
@@ -22,12 +31,15 @@ from langsmith import traceable
 from app.aggregator import aggregate
 from app.memory import SharedMemoryStore, get_store
 from app.orchestrator import orchestrate
+from app.sandbox import SwarmSandbox
+from app.skills_loader import upload_skills
 from app.state import (
     AgentComplete,
     AgentHandedOff,
     AgentRunning,
     AgentSpawned,
     AgentSpec,
+    ArtifactEmitted,
     ErrorEvent,
     FinalResult,
     OrchestratorReasoning,
@@ -40,6 +52,8 @@ from app.worker import run_handoff_worker, run_worker
 logger = logging.getLogger(__name__)
 
 CONCURRENCY = 4
+_ARTIFACTS_SANDBOX_DIR = "/home/user/workspace/artifacts"
+_ARTIFACTS_LOCAL_ROOT = Path.home() / ".agent-swarm" / "artifacts"
 
 
 @traceable(name="run_swarm", run_type="chain")
@@ -59,6 +73,7 @@ async def run_swarm(  # type: ignore[misc]
     """
     store = store or get_store()
     session_id = session_id or f"ephemeral-{uuid.uuid4().hex[:8]}"
+    sandbox: SwarmSandbox | None = None
     try:
         # ─── Phase 1 — Orchestrate ───────────────────────────────────────────
         yield PhaseStart(phase="orchestrating")
@@ -66,6 +81,19 @@ async def run_swarm(  # type: ignore[misc]
         yield OrchestratorReasoning(reasoning=orch.reasoning)
         for spec in orch.agents:
             yield AgentSpawned(spec=spec, is_handoff=False)
+
+        # ─── Create the shared sandbox (best-effort) ─────────────────────────
+        if os.getenv("E2B_API_KEY"):
+            try:
+                sandbox = await SwarmSandbox.create(
+                    template_id=os.getenv("E2B_TEMPLATE_ID"),
+                    timeout=int(os.getenv("E2B_SANDBOX_TIMEOUT", "600")),
+                )
+                await upload_skills(sandbox)
+            except Exception as e:
+                logger.warning("sandbox bootstrap failed: %s", e)
+                yield ErrorEvent(message=f"sandbox unavailable: {e}", phase="executing")
+                sandbox = None
 
         # ─── Phase 2 — Parallel workers ──────────────────────────────────────
         yield PhaseStart(phase="executing")
@@ -90,6 +118,7 @@ async def run_swarm(  # type: ignore[misc]
                         on_event=queue.put,
                         store=store,
                         session_id=session_id,
+                        sandbox=sandbox,
                     )
                 except Exception as e:
                     # Contain per-worker failures (e.g. RateLimitError after retries
@@ -160,6 +189,7 @@ async def run_swarm(  # type: ignore[misc]
                     on_event=queue.put,
                     store=store,
                     session_id=session_id,
+                    sandbox=sandbox,
                 )
                 # Drain any events the handoff worker queued
                 while not queue.empty():
@@ -174,11 +204,17 @@ async def run_swarm(  # type: ignore[misc]
 
         # ─── Phase 4 — Aggregate ─────────────────────────────────────────────
         yield PhaseStart(phase="aggregating")
+
+        # Peek at artifact filenames BEFORE the aggregator runs so it can
+        # mention them in the final answer.
+        artifact_names = await _list_artifact_names(sandbox)
+
         try:
             final = await aggregate(
                 task=task,
                 results=worker_results + handoff_results,
                 shared_memory=shared_memory,
+                artifacts=artifact_names,
             )
         except Exception as e:
             # Don't throw away the swarm's work if the aggregator's own LLM call
@@ -193,10 +229,31 @@ async def run_swarm(  # type: ignore[misc]
             handoffs_total=len(handoff_results),
             memory_entries=len(shared_memory),
         )
+
+        # ─── Phase 4.5 — Harvest artifacts ───────────────────────────────────
+        if sandbox is not None and artifact_names:
+            local_dir = _ARTIFACTS_LOCAL_ROOT / session_id
+            try:
+                local_dir.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                logger.warning("artifact local dir creation failed: %s", e)
+            else:
+                async for art_ev in _harvest_artifacts(
+                    sandbox, artifact_names, session_id, local_dir,
+                ):
+                    yield art_ev
+                logger.info("artifacts saved to %s", local_dir)
+
         yield PhaseStart(phase="complete")
 
     except Exception as e:
         yield ErrorEvent(message=f"{type(e).__name__}: {e}")
+    finally:
+        if sandbox is not None:
+            try:
+                await sandbox.close()
+            except Exception as e:
+                logger.warning("sandbox close failed: %s", e)
 
 
 def _handoff_name(to_role: str) -> str:
@@ -232,3 +289,70 @@ def _fallback_final(
             lines.append(r.text)
             lines.append("")
     return "\n".join(lines)
+
+
+# ─── Artifact harvesting ─────────────────────────────────────────────────────
+
+
+async def _list_artifact_names(sandbox: SwarmSandbox | None) -> list[str]:
+    """Return the bare filenames of regular files inside the artifacts dir.
+
+    Returns an empty list on any failure or if the sandbox is unavailable.
+    """
+    if sandbox is None:
+        return []
+    try:
+        entries = await sandbox.list_files(_ARTIFACTS_SANDBOX_DIR)
+    except Exception as e:
+        logger.warning("artifact ls failed: %s", e)
+        return []
+    return [e["name"] for e in entries if not e.get("is_dir")]
+
+
+async def _harvest_artifacts(
+    sandbox: SwarmSandbox,
+    names: list[str],
+    session_id: str,
+    local_dir: Path,
+) -> AsyncIterator[ArtifactEmitted]:
+    """Download each artifact and emit one ArtifactEmitted per file."""
+    for name in names:
+        sandbox_path = f"{_ARTIFACTS_SANDBOX_DIR}/{name}"
+        try:
+            data = await sandbox.read_bytes(sandbox_path)
+        except Exception as e:
+            logger.warning("artifact download failed for %s: %s", name, e)
+            continue
+
+        local_path = local_dir / name
+        try:
+            local_path.write_bytes(data)
+        except Exception as e:
+            logger.warning("artifact write failed for %s: %s", name, e)
+            continue
+
+        title = Path(name).stem
+        yield ArtifactEmitted(
+            identifier=f"{session_id}/{name}",
+            title=title,
+            mime_type=_guess_mime(name, data),
+            local_path=str(local_path),
+            sandbox_path=sandbox_path,
+            size_bytes=len(data),
+        )
+
+
+def _guess_mime(filename: str, data: bytes) -> str:
+    """Best-effort MIME detection: stdlib first, magic-byte fallback."""
+    mime, _ = mimetypes.guess_type(filename)
+    if mime:
+        return mime
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:4] == b"%PDF":
+        return "application/pdf"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    return "application/octet-stream"
