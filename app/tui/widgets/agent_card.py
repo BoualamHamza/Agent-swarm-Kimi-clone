@@ -33,6 +33,13 @@ TOOL_ICONS: dict[str, str] = {
     "request_handoff":        "🔄",
     "web_search":             "🔍",
     "run_python":             "🐍",
+    "read_file":              "📄",
+    "write_file":             "✏️",
+    "edit_file":              "📝",
+    "list_files":             "📂",
+    "glob_files":             "🔎",
+    "grep_files":             "🔬",
+    "run_shell":              "💻",
 }
 
 

@@ -14,7 +14,7 @@ dependencies = [
     "uvicorn[standard]>=0.32",
     "python-dotenv>=1.0",
     "httpx>=0.27",
-    "e2b-code-interpreter>=1.0",
+    "e2b>=2.0",
     "aiosqlite>=0.20",
     "textual>=0.80",
 ]
@@ -39,3 +39,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["app*"]
+
+[tool.setuptools.package-data]
+"app.skills" = ["*/SKILL.md"]

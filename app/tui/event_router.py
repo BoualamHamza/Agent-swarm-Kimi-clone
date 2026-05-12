@@ -22,6 +22,7 @@ from app.state import (
     AgentHandedOff,
     AgentRunning,
     AgentSpawned,
+    ArtifactEmitted,
     ErrorEvent,
     FinalResult,
     HandoffRequested,
@@ -167,6 +168,13 @@ class EventRouter:
         # Clear the thinking line — the answer subsumes it.
         self.app.chat_pane.set_thinking("")
 
+    def _on_artifact(self, ev: ArtifactEmitted) -> None:
+        self.app.swarm_computer.artifacts_view.add(ev)
+        # First artifact auto-switches to the artifacts tab so the user
+        # immediately sees their deliverable land.
+        if len(self.app.swarm_computer.artifacts_view._rows) == 1:
+            self.app.swarm_computer.show_artifacts()
+
     def _on_error(self, ev: ErrorEvent) -> None:
         self.app.chat_pane.set_thinking(f"[b red]Error:[/b red] {ev.message}")
 
@@ -182,6 +190,7 @@ class EventRouter:
         "agent_complete":        _on_complete,
         "agent_handed_off":      _on_handed_off,
         "final_result":          _on_final,
+        "artifact_emitted":      _on_artifact,
         "error":                 _on_error,
     }
 

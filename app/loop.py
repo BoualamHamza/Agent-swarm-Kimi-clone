@@ -22,6 +22,7 @@ from typing import Any, Awaitable, Callable
 
 from app.client import get_openrouter
 from app.memory import SharedMemoryStore
+from app.sandbox import SwarmSandbox
 from app.state import (
     Handoff,
     HandoffRequested,
@@ -53,10 +54,14 @@ async def tool_use_loop(
     max_tokens: int = 16000,  # reasoning-model headroom; non-reasoning models stop early
     store: SharedMemoryStore | None = None,
     session_id: str | None = None,
+    sandbox: SwarmSandbox | None = None,
 ) -> LoopOutcome:
     """Run a single agent's tool-use loop and return a structured outcome."""
     client = get_openrouter()
-    executor = ToolExecutor(shared_memory, lock, store=store, session_id=session_id)
+    executor = ToolExecutor(
+        shared_memory, lock,
+        store=store, session_id=session_id, sandbox=sandbox,
+    )
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": system},
         {"role": "user",   "content": user},

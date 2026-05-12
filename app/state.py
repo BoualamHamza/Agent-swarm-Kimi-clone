@@ -23,6 +23,9 @@ class AgentSpec(BaseModel):
     name: str = Field(description="Short PascalCase agent name")
     role: str = Field(description="One-line specialist description")
     task: str = Field(description="Specific subtask to execute")
+    # Forward-compat: per-agent skill curation. v1 ignores this — every worker
+    # sees every installed skill. The orchestrator can populate it later.
+    skills: list[str] | None = None
 
 
 class OrchestratorOutput(BaseModel):
@@ -152,6 +155,22 @@ class FinalResult(_EventBase):
     memory_entries: int
 
 
+class ArtifactEmitted(_EventBase):
+    """A user-facing deliverable harvested from the sandbox after aggregation.
+
+    The conductor downloads each file from ``/home/user/workspace/artifacts/``
+    to ``~/.agent-swarm/artifacts/{session_id}/`` and emits one of these per
+    file. The TUI renders them in a dedicated panel.
+    """
+    type: Literal["artifact_emitted"] = "artifact_emitted"
+    identifier: str       # f"{session_id}/{filename}"
+    title: str            # filename without extension
+    mime_type: str        # "image/png" / "text/csv" / "application/octet-stream" etc.
+    local_path: str       # absolute path on the host
+    sandbox_path: str     # absolute path inside the e2b sandbox
+    size_bytes: int
+
+
 class ErrorEvent(_EventBase):
     type: Literal["error"] = "error"
     message: str
@@ -171,6 +190,7 @@ SwarmEvent = Annotated[
         AgentComplete,
         AgentHandedOff,
         FinalResult,
+        ArtifactEmitted,
         ErrorEvent,
     ],
     Field(discriminator="type"),

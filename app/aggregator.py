@@ -30,6 +30,7 @@ async def aggregate(
     shared_memory: dict[str, str],
     model: str | None = None,
     max_tokens: int = 40000,  # reasoning-model headroom; non-reasoning models stop early
+    artifacts: list[str] | None = None,
 ) -> str:
     client = get_openrouter()
     model = model or MODELS["aggregator"]
@@ -57,11 +58,20 @@ async def aggregate(
         if shared_memory else "(empty)"
     )
 
+    artifact_note = ""
+    if artifacts:
+        artifact_note = (
+            "\n\nDeliverable files saved to /home/user/workspace/artifacts/: "
+            + ", ".join(artifacts)
+            + ". Reference them by filename in your final answer when relevant."
+        )
+
     user = (
         f"Original task: {task}\n\n"
         f"Shared memory:\n{mem_dump}\n\n"
         f"Agent outputs:\n{outputs}"
-        f"{failed_note}\n\n"
+        f"{failed_note}"
+        f"{artifact_note}\n\n"
         f"Synthesize a final answer."
     )
 
