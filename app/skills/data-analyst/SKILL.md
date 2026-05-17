@@ -1,6 +1,6 @@
 ---
 name: data-analyst
-description: Analyze datasets using pandas and numpy inside the sandbox, produce statistics, charts, and insights
+description: INVOKE when the task involves analyzing tabular data, computing statistics, generating charts, or interpreting a dataset. Uses pandas/numpy/matplotlib in the sandbox. Triggers — "analyze CSV", "compute statistics", "describe data", "plot", "correlation", "summarize dataset", "trends", "aggregations".
 ---
 
 # Data Analyst

@@ -78,14 +78,14 @@ def _executor(sandbox: FakeSandbox | None) -> Any:
 # ─── Schema registration ─────────────────────────────────────────────────────
 
 
-def test_all_fourteen_schemas_registered():
+def test_all_schemas_registered():
     from app.tools import TOOL_SCHEMAS
 
     names = {s["function"]["name"] for s in TOOL_SCHEMAS}
     expected = {
         "calculate", "get_current_date",
-        "write_to_shared_memory", "read_shared_memory",
-        "request_handoff", "web_search",
+        "write_to_shared_memory", "read_shared_memory", "wait_for_memory",
+        "request_handoff", "web_search", "scrape_url",
         "run_python",
         "read_file", "write_file", "edit_file",
         "list_files", "glob_files", "grep_files", "run_shell",

@@ -7,6 +7,7 @@ and Phase 3 (handoff specialist agents).
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 
 from langsmith import traceable
 
@@ -39,26 +40,36 @@ def _worker_system(spec: AgentSpec, task: str, roster: list[AgentSpec]) -> str:
     roster_str = " | ".join(f"{a.name}({a.role})" for a in roster)
     workspace = _WORKSPACE_SECTION.replace("{agent_id}", spec.id)
     skills = skills_prompt_section()
-    return f"""You are {spec.name}, specialist in: {spec.role}.
+    today = datetime.now().strftime("%Y-%m-%d")
+    return f"""Today's date: {today}
+
+You are {spec.name}, specialist in: {spec.role}.
 
 Overall goal: {task}
 Swarm roster: {roster_str}
 Your task: {spec.task}
 
+{skills}
+SKILL-FIRST PROTOCOL (mandatory):
+- BEFORE your first tool call, scan the skills list above. If ANY skill's description matches your task — especially when the user said "skills", "skillset", or "all your skills" (they mean the SKILL.md system above, not vague capabilities) — you MUST read its playbook first via read_file("/home/user/skills/{{name}}/SKILL.md") and follow it. One extra read_file is cheap; skipping a skill and re-discovering its recipe by trial-and-error is expensive.
+- If multiple skills apply, read each of their SKILL.md files before fanning out into other tools.
+- If NO skill applies, say so briefly in your reasoning and proceed.
+
 Tool budget — keep this loop short:
-- At most 3 web_search calls. After that, work with what you have.
+- At most 10 web_search calls. After that, work with what you have.
 - After gathering enough information, write your KEY findings to shared memory and then produce your final response.
-- Aim to finish within 10-12 tool calls total.
+- Aim to finish within 10-12 tool calls total (skill reads do not count against this budget — they save calls).
 
 Tool usage:
-- Start by calling read_shared_memory(key="all") to see what other agents have found.
-- Use write_to_shared_memory to share concise findings with the swarm (short keys, concise values).
+- Start by calling read_shared_memory(key="all") to see what other agents have already found. Empty memory at startup is NORMAL — the swarm just spawned and nobody has written yet.
+- If your task plainly depends on another agent's finding (e.g. it mentions "the primes from PrimeGenerator", "given the array of X"), DO NOT bail. Call wait_for_memory(key="that_key", timeout_sec=60) — it blocks until that agent writes the key, then returns the value. Use specific keys you expect the upstream agent to use; if unsure, wait_for_memory with the most likely key and fall back to doing the work yourself on timeout.
+- Use write_to_shared_memory to share concise findings with the swarm (short keys, concise values). Other agents may be polling for your output via wait_for_memory.
 - Use calculate for any numeric reasoning.
 - Use get_current_date if temporal context matters.
 - Use web_search for current information only — do NOT search for things you can reason about.
+- Use scrape_url to read the full content of a specific URL found via web_search when a snippet is not enough.
 - Use request_handoff ONLY if you discover work needing a genuinely different specialist.
 {workspace}
-{skills}
 Your final text response is your result — write it clearly and structured for synthesis. Do not end with another tool call when your investigation is done."""
 
 
@@ -77,8 +88,12 @@ Their findings so far:
 Your specific task: {handoff.context}
 Overall goal: {task}
 
-Start by calling read_shared_memory(key="all") to see the full swarm context, then complete your work. Use write_to_shared_memory to record key findings. The shared sandbox at /home/user/workspace/ is available — earlier agents may have left files for you (look for `artifact:*` keys in shared memory).
-{skills}"""
+{skills}
+SKILL-FIRST PROTOCOL (mandatory):
+- BEFORE your first tool call, scan the skills list above. If ANY skill's description matches your task — especially when the user said "skills" or "skillset" (they mean the SKILL.md system above, not vague capabilities) — you MUST read its playbook first via read_file("/home/user/skills/{{name}}/SKILL.md") and follow it.
+- If NO skill applies, proceed normally.
+
+Start by calling read_shared_memory(key="all") to see the full swarm context, then complete your work. Use write_to_shared_memory to record key findings. The shared sandbox at /home/user/workspace/ is available — earlier agents may have left files for you (look for `artifact:*` keys in shared memory)."""
 
 
 @traceable(name="worker", run_type="chain")

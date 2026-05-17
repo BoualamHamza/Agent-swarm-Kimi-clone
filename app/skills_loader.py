@@ -106,6 +106,32 @@ def skills_prompt_section(skills: tuple[Skill, ...] | None = None) -> str:
     return "\n".join(lines)
 
 
+def skills_orchestrator_section(skills: tuple[Skill, ...] | None = None) -> str:
+    """Render a condensed skills catalogue for the orchestrator system prompt.
+
+    The orchestrator never invokes tools; it only needs to know which skills
+    exist so it can mention them by name in each spawned agent's task.
+    Returns an empty string when no skills are installed.
+    """
+    skills = skills if skills is not None else load_skills()
+    if not skills:
+        return ""
+    lines = [
+        "",
+        "Available worker skills (procedural playbooks the workers can read at runtime):",
+    ]
+    for s in skills:
+        lines.append(f"- {s.name} — {s.description}")
+    lines.append("")
+    lines.append(
+        "When a spawned agent's task plainly matches one of the skills above, "
+        "mention that skill by name in the agent's `task` field — e.g. "
+        '"Use the `financial-analyst` skill to ...". Do NOT force a skill onto '
+        "a task it does not fit; if no skill clearly applies, omit the mention."
+    )
+    return "\n".join(lines)
+
+
 async def upload_skills(
     sandbox: "SwarmSandbox",
     skills: tuple[Skill, ...] | None = None,

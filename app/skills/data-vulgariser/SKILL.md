@@ -1,6 +1,6 @@
 ---
 name: data-vulgariser
-description: Translate data analysis results and statistical concepts into plain language explanations for non-technical audiences
+description: INVOKE when you need to translate analysis results, statistics, or technical findings into plain language for non-technical audiences. Pair with data-analyst — analyze first, then vulgarise. Triggers — "explain for non-experts", "plain English summary", "translate findings", "simple explanation", "what does this mean".
 ---
 
 # Data Vulgariser

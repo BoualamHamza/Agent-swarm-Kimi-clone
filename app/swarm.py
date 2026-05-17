@@ -51,6 +51,9 @@ from app.worker import run_handoff_worker, run_worker
 
 logger = logging.getLogger(__name__)
 
+# Max workers executing at once. The orchestrator may spawn up to MAX_AGENTS
+# (20); anything beyond CONCURRENCY queues and runs in later waves. The
+# orchestrator prompt is told about this budget so it can plan accordingly.
 CONCURRENCY = 4
 _ARTIFACTS_SANDBOX_DIR = "/home/user/workspace/artifacts"
 _ARTIFACTS_LOCAL_ROOT = Path.home() / ".agent-swarm" / "artifacts"

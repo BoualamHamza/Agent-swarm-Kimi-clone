@@ -41,6 +41,8 @@ def main() -> int:
             "lxml",
             "tabulate",
             "scipy",
+            "yfinance",
+            "openpyxl",
         ])
         .apt_install(["ripgrep", "curl", "git", "jq"])
         .make_dir("/home/user/workspace")

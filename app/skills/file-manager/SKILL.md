@@ -1,6 +1,6 @@
 ---
 name: file-manager
-description: Navigate, organize, search, and manipulate files in the E2B sandbox filesystem using ls, glob, grep, read_file, write_file, and edit_file
+description: INVOKE when the task involves navigating the sandbox filesystem, searching across files, or organizing the workspace. Uses list_files, glob_files, grep_files, read_file, write_file, edit_file. Triggers — "find file", "list files", "search workspace", "organize artifacts", "where is X", "explore the workspace".
 ---
 
 # File Manager

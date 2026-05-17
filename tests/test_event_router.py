@@ -65,7 +65,7 @@ async def test_artifact_event_mounts_row():
     """Dispatching an ArtifactEmitted should add a row to the artifacts view
     in the right-hand SwarmComputer pane and auto-switch to that tab."""
     app = SwarmApp(demo=False)
-    async with app.run_test(size=(140, 40)) as pilot:
+    async with app.run_test(size=(160, 44)) as pilot:
         view = app.swarm_computer.artifacts_view
         assert len(view._rows) == 0
         app.router.dispatch(  # type: ignore[union-attr]
@@ -80,7 +80,7 @@ async def test_artifact_event_mounts_row():
         )
         await pilot.pause(0.2)
         # First artifact triggers an auto-switch to the artifacts tab.
-        assert app.swarm_computer._tabs.active == "tab-artifacts"
+        assert app.swarm_computer._switcher.current == "artifacts"
     assert len(view._rows) == 1
     assert view._rows[0].title == "chart"
 
@@ -101,13 +101,13 @@ async def test_spawn_then_run_then_complete_flow():
         PhaseStart(phase="complete"),
     ]
     app = SwarmApp(demo=False)
-    async with app.run_test(size=(120, 30)) as pilot:
+    async with app.run_test(size=(160, 40)) as pilot:
         for ev in events:
             app.router.dispatch(ev)  # type: ignore[union-attr]
         await pilot.pause(0.3)
 
-        card = app.swarm_computer.grid.get_card("x1")
-        assert card is not None
-        assert card.working is False
+        pill = app.swarm_computer.strip.get_pill("x1")
+        assert pill is not None
+        assert pill.status == "done"
         assert app.swarm_computer.memory._rows.get("result") is not None
-        assert app.swarm_computer.header._completed == 1
+        assert app.swarm_header._completed == 1

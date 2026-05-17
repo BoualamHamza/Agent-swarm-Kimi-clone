@@ -1,4 +1,4 @@
-"""SwarmApp — the Textual App and `agent-swarm` CLI entry point.
+"""SwarmApp — the Textual App and ``agent-swarm`` CLI entry point.
 
 Usage:
     agent-swarm             # interactive: type a task, swarm runs in-process
@@ -15,13 +15,22 @@ from typing import AsyncIterator
 from textual import on
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal
-from textual.widgets import Footer, Header, Input
+from textual.widgets import Footer, Input
 
 from app.state import SwarmEvent
 from app.tui.event_router import EventRouter
-from app.tui.widgets.chat_pane import ChatPane
+from app.tui.widgets.agent_strip import AgentPill
+from app.tui.widgets.chat_pane import AgentRosterRow, ChatPane
 from app.tui.widgets.input_bar import InputBar
-from app.tui.widgets.swarm_computer import SwarmComputer
+from app.tui.widgets.swarm_computer import (
+    SwarmComputer,
+    TAB_AGENT,
+    TAB_ARTIFACTS,
+    TAB_CODE,
+    TAB_LOGS,
+    TAB_PREVIEW,
+)
+from app.tui.widgets.swarm_header import SwarmHeader
 
 
 class SwarmApp(App):
@@ -30,29 +39,37 @@ class SwarmApp(App):
     BINDINGS = [
         ("q", "quit", "Quit"),
         ("ctrl+c", "quit", "Quit"),
-        ("f1", "show_computer", "Computer"),
-        ("f2", "show_artifacts", "Artifacts"),
+        ("1", "switch_tab('logs')", "Logs"),
+        ("2", "switch_tab('code')", "Code"),
+        ("3", "switch_tab('preview')", "Preview"),
+        ("4", "switch_tab('artifacts')", "Artifacts"),
+        ("a", "switch_tab('artifacts')", "Artifacts"),
+        ("c", "switch_tab('logs')", "Logs"),
+        ("m", "toggle_memory", "Memory"),
+        ("f", "toggle_final", "Final"),
+        ("escape", "unfocus_agent", "Back"),
+        ("up", "roster_prev", "↑ Agent"),
+        ("down", "roster_next", "↓ Agent"),
+        ("k", "roster_prev", "↑ Agent"),
+        ("j", "roster_next", "↓ Agent"),
+        ("enter", "focus_selected", "Focus"),
     ]
-
-    def action_show_computer(self) -> None:
-        self.swarm_computer.show_computer()
-
-    def action_show_artifacts(self) -> None:
-        self.swarm_computer.show_artifacts()
 
     def __init__(self, *, demo: bool = False) -> None:
         super().__init__()
         self._demo = demo
+        self.swarm_header = SwarmHeader()
         self.chat_pane = ChatPane()
         self.swarm_computer = SwarmComputer()
         self.input_bar = InputBar()
         self.router: EventRouter | None = None
         self._run_task: asyncio.Task[None] | None = None
+        self.focused_agent: str | None = None
 
     # ─── Layout ─────────────────────────────────────────────────────────────
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=False)
+        yield self.swarm_header
         with Horizontal(id="body"):
             yield self.chat_pane
             yield self.swarm_computer
@@ -61,14 +78,63 @@ class SwarmApp(App):
 
     def on_mount(self) -> None:
         self.title = "Agent Swarm"
-        self.sub_title = "Kimi-style TUI · v0.1"
+        self.sub_title = "Mission Control · v0.2"
+        self.swarm_header.swarm_name = "Untitled Swarm"
         self.router = EventRouter(self)
         if self._demo:
+            self.swarm_header.swarm_name = "Math Word-Problem Benchmark"
             self._run_task = asyncio.create_task(self._run_demo())
         else:
             self.input_bar.focus_input()
 
-    # ─── Input handling ─────────────────────────────────────────────────────
+    # ─── Actions / bindings ─────────────────────────────────────────────────
+
+    def action_switch_tab(self, tab_id: str) -> None:
+        if tab_id not in {TAB_LOGS, TAB_CODE, TAB_PREVIEW, TAB_ARTIFACTS, TAB_AGENT}:
+            return
+        self.swarm_computer.show_tab(tab_id)
+
+    def action_toggle_memory(self) -> None:
+        self.swarm_computer.memory.toggle()
+
+    def action_toggle_final(self) -> None:
+        self.chat_pane.final.toggle()
+
+    def action_roster_prev(self) -> None:
+        self.chat_pane.roster.move_cursor(-1)
+
+    def action_roster_next(self) -> None:
+        self.chat_pane.roster.move_cursor(+1)
+
+    def action_focus_selected(self) -> None:
+        sel = self.chat_pane.roster._selected
+        if sel:
+            self._focus_agent(sel)
+
+    def action_unfocus_agent(self) -> None:
+        if self.focused_agent is None:
+            return
+        self.focused_agent = None
+        self.swarm_computer.agent_detail.unfocus()
+        self.swarm_computer.show_tab(TAB_LOGS)
+
+    # ─── Agent focus plumbing ──────────────────────────────────────────────
+
+    def _focus_agent(self, agent_id: str) -> None:
+        self.focused_agent = agent_id
+        self.chat_pane.roster.select(agent_id)
+        self.swarm_computer.agent_detail.focus_agent(agent_id)
+        self.swarm_computer.show_agent_detail()
+
+    @on(AgentPill.Clicked)
+    def _on_pill_clicked(self, event: AgentPill.Clicked) -> None:
+        self._focus_agent(event.agent_id)
+
+    @on(AgentRosterRow.Clicked)
+    def _on_roster_clicked(self, event: AgentRosterRow.Clicked) -> None:
+        self._focus_agent(event.agent_id)
+
+    # ─── Input handling ────────────────────────────────────────────────────
 
     @on(Input.Submitted, "#task-input")
     def _on_input_submitted(self, event: Input.Submitted) -> None:
@@ -76,15 +142,13 @@ class SwarmApp(App):
         if not task:
             return
         if self._run_task and not self._run_task.done():
-            return  # a run is already in progress
+            return
         self.input_bar.clear()
         self._run_task = asyncio.create_task(self._run_live(task))
 
-    # ─── Event loops ────────────────────────────────────────────────────────
+    # ─── Event loops ───────────────────────────────────────────────────────
 
     async def _run_demo(self) -> None:
-        # Imported lazily so a fresh checkout without the demo file still
-        # produces a useful error rather than failing at top-level import.
         from app.tui.demo import scripted_events
         self.chat_pane.task_card.set_task("[DEMO] Math Word-Problem Benchmark")
         await self._consume(scripted_events())
@@ -92,6 +156,7 @@ class SwarmApp(App):
     async def _run_live(self, task: str) -> None:
         from app.swarm import run_swarm
         self.chat_pane.task_card.set_task(task)
+        self.swarm_header.swarm_name = task[:40]
         try:
             await self._consume(run_swarm(task))
         except Exception as e:
@@ -113,7 +178,6 @@ def run() -> None:
                         help="Run the scripted demo (no API keys needed)")
     args = parser.parse_args()
 
-    # Make sure relative imports / data files work when invoked from anywhere.
     here = Path(__file__).resolve().parent
     os.chdir(here.parent.parent)
 

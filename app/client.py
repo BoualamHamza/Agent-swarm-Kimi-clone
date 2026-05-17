@@ -1,4 +1,4 @@
-"""Async clients for OpenRouter (LLM) and Tavily (web search).
+"""Async clients for OpenRouter (LLM), Tavily (web search), and Firecrawl (scraping).
 
 Singletons — instantiated lazily on first access so tests can monkeypatch
 environment variables without import-time failures.
@@ -53,3 +53,12 @@ def get_tavily() -> AsyncTavilyClient:
     if not api_key:
         raise RuntimeError("TAVILY_API_KEY is not set")
     return AsyncTavilyClient(api_key=api_key)
+
+
+@lru_cache(maxsize=1)
+def get_firecrawl():
+    from firecrawl import FirecrawlApp
+    api_key = os.environ.get("FIRECRAWL_API_KEY")
+    if not api_key:
+        raise RuntimeError("FIRECRAWL_API_KEY is not set")
+    return FirecrawlApp(api_key=api_key)
