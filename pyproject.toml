@@ -7,6 +7,7 @@ dependencies = [
     "openai>=1.50",
     "pydantic>=2.9",
     "tavily-python>=0.5",
+    "firecrawl-py>=1.0",
     "asteval>=0.9.31",
     "langsmith>=0.3.0",
     "fastapi>=0.115",

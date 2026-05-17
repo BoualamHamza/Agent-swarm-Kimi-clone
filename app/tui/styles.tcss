@@ -1,33 +1,53 @@
-/* Agent-Swarm TUI — Kimi-style layout
+/* Agent-Swarm TUI — "Mission Control" layout (v0.2)
  *
- * Layout overview:
- *   ┌ Header ──────────────────────────────────────────────┐
- *   │ ChatPane (40%)        │ SwarmComputer (60%)         │
- *   │ ┌ TaskCard ──┐        │ ┌ ComputerHeader ─────────┐ │
- *   │ │            │        │ ├ AgentGrid ──────────────┤ │
- *   │ ├ Thinking ─ ┤        │ │ AgentCards (wrap)       │ │
- *   │ ├ TaskRoster ┤        │ ├ MemoryDrawer ───────────┤ │
- *   │ │ rows…      │        │ └─────────────────────────┘ │
- *   │ └ Answer ────┘        │                             │
- *   ├ InputBar (footer) ─────────────────────────────────-┤
- *   └─────────────────────────────────────────────────────┘
+ *   ┌ SwarmHeader (dashboard) ─────────────────────────────┐
+ *   │                                                       │
+ *   ├ Sidebar (30%) ──── │ Main Stage (70%) ────────────────┤
+ *   │ TaskCard           │ AgentStrip (1 line of pills)     │
+ *   │ Thinking           │ Tab bar  Logs Code Preview Arts  │
+ *   │ TaskRoster         │ ┌─ ContentSwitcher ────────────┐ │
+ *   │ FinalAnswer (col.) │ │ Logs (RichLog)               │ │
+ *   │                    │ │ Code / Preview / Artifacts   │ │
+ *   │                    │ │ AgentDetail (focus mode)     │ │
+ *   │                    │ └──────────────────────────────┘ │
+ *   │                    │ MemoryDrawer (collapsible)       │
+ *   ├ PromptInput (footer) ────────────────────────────────-┤
+ *   └───────────────────────────────────────────────────────┘
  */
 
 Screen {
     background: $surface;
 }
 
+/* ─── Header (full width) ──────────────────────────────────────────────── */
+
+#swarm-header {
+    height: 1;
+    padding: 0 1;
+    background: $primary 20%;
+    color: $text;
+}
+#swarm-header.-running {
+    background: $warning 25%;
+}
+#swarm-header.-complete {
+    background: $success 25%;
+}
+
+/* ─── Body split ───────────────────────────────────────────────────────── */
+
 Horizontal#body {
     height: 1fr;
 }
 
-/* ─── ChatPane (left) ───────────────────────────────────────────────────── */
+/* ─── Sidebar (left, 30%) ──────────────────────────────────────────────── */
 
 ChatPane {
-    width: 40%;
-    border-right: solid $primary 30%;
+    width: 30%;
+    border-right: solid $primary 40%;
     padding: 1;
     height: 1fr;
+    layout: vertical;
 }
 
 #task-card {
@@ -42,18 +62,220 @@ ChatPane {
     margin-bottom: 1;
 }
 
-#answer {
+/* Roster */
+
+#task-roster {
+    height: 1fr;
+    border-top: solid $primary 30%;
+    padding: 1 0;
+    overflow-y: auto;
+}
+
+.roster-title {
+    height: 1;
+    margin-bottom: 1;
+}
+
+.roster-row {
+    height: 2;
+    margin-bottom: 1;
+    padding: 0 1;
+}
+
+.roster-row:hover {
+    background: $primary 15%;
+}
+
+.roster-row.-selected {
+    background: $primary 25%;
+    border-left: thick $accent;
+}
+
+.roster-row.-running { color: $warning; }
+.roster-row.-done    { color: $success; }
+.roster-row.-error   { color: $error;   }
+.roster-row.-handoff { color: $accent;  }
+
+/* Final answer */
+
+#final-answer {
+    height: auto;
+    max-height: 40%;
+    border-top: dashed $primary 30%;
+    padding: 1 0;
+}
+#final-answer.collapsed {
+    max-height: 2;
+}
+#final-title {
+    height: 1;
+}
+#final-body {
     height: auto;
     margin-top: 1;
+    background: $boost;
     padding: 1;
+}
+
+/* ─── Main stage (right, 70%) ──────────────────────────────────────────── */
+
+SwarmComputer {
+    width: 70%;
+    padding: 0;
+    height: 1fr;
+    layout: vertical;
+}
+
+/* Agent strip — 1 line of pills */
+
+#strip {
+    height: 4;
+    padding: 0 1;
+    background: $surface;
+    border-bottom: solid $primary 30%;
+    scrollbar-size-horizontal: 1;
+}
+
+#strip-empty {
+    width: auto;
+    height: 1;
+    padding: 1 1;
+    color: $text-muted;
+}
+
+.agent-pill {
+    width: auto;
+    height: 3;
+    padding: 0 1;
+    margin: 0 1 0 0;
+    border: solid $primary 50%;
+    text-align: center;
+    content-align: center middle;
+}
+.agent-pill.-running {
+    border: solid $warning;
+    background: $warning 20%;
+    text-style: bold;
+}
+.agent-pill.-done {
+    border: solid $success;
+}
+.agent-pill.-error {
+    border: solid $error;
+}
+.agent-pill.-handoff {
+    border: solid $accent;
+}
+
+/* Tab bar */
+
+#stage-tabs {
+    height: 1;
+    background: $primary 15%;
+    padding: 0 1;
+}
+
+#stage-title {
+    width: auto;
+    height: 1;
+    margin: 0 2 0 0;
+    color: $text;
+}
+
+.stage-tab {
+    width: auto;
+    height: 1;
+    margin: 0 1 0 0;
+    padding: 0 1;
+    color: $text-muted;
+}
+.stage-tab:hover {
+    color: $text;
+}
+.stage-tab.-active {
+    color: $text;
+    background: $accent 30%;
+    text-style: bold;
+}
+
+/* ContentSwitcher fills remaining space */
+
+#stage {
+    height: 1fr;
+}
+
+#logs,
+#code,
+#preview,
+#agent-detail {
+    height: 1fr;
+    padding: 1;
+}
+
+#code,
+#preview {
     background: $boost;
 }
 
-/* ─── Artifacts tab ─────────────────────────────────────────────────────── */
-
-#computer-tabs {
-    height: 1fr;
+/* Preview is a VerticalScroll wrapping a Markdown — let the Markdown grow
+ * past the viewport so long agent answers scroll instead of clipping. */
+#preview {
+    overflow-y: auto;
+    scrollbar-size-vertical: 1;
 }
+#preview > Markdown {
+    height: auto;
+}
+
+/* Memory drawer */
+
+#memory-drawer {
+    height: auto;
+    max-height: 14;
+    border-top: solid $primary 30%;
+    padding: 1 1;
+    background: $surface;
+}
+#memory-drawer.collapsed {
+    max-height: 1;
+    padding: 0 1;
+}
+
+.mem-title {
+    height: 1;
+}
+
+.mem-row {
+    height: 1;
+    color: $text;
+}
+.mem-row.-flash {
+    background: $accent 30%;
+}
+
+/* ─── Agent detail view ────────────────────────────────────────────────── */
+
+#agent-detail {
+    layout: vertical;
+}
+#detail-header {
+    height: auto;
+    padding: 1 1;
+    background: $boost;
+    border-bottom: solid $primary 30%;
+}
+#detail-logs {
+    height: 1fr;
+    margin-top: 1;
+}
+#detail-tools {
+    height: auto;
+    padding: 1;
+    border-top: solid $primary 30%;
+    background: $boost;
+}
+
+/* ─── Artifacts view (kept from v0.1, restyled) ───────────────────────── */
 
 #artifacts-view {
     height: 1fr;
@@ -83,12 +305,10 @@ ChatPane {
     margin-bottom: 1;
     color: $text;
 }
-
 #artifact-preview-body {
     height: auto;
     color: $text;
 }
-
 #artifact-preview-placeholder {
     height: auto;
     color: $text-muted;
@@ -98,111 +318,7 @@ ChatPane {
     display: none;
 }
 
-/* TaskRoster */
-
-#task-roster {
-    height: auto;
-    border-top: solid $primary 30%;
-    padding: 1 0;
-}
-
-.roster-title {
-    height: 1;
-    margin-bottom: 1;
-}
-
-.roster-row {
-    height: 2;
-    margin-bottom: 1;
-}
-
-/* ─── SwarmComputer (right) ─────────────────────────────────────────────── */
-
-SwarmComputer {
-    width: 60%;
-    padding: 0;
-    height: 1fr;
-}
-
-#computer-header {
-    height: 1;
-    background: $primary 20%;
-    padding: 0 1;
-}
-
-#agent-grid {
-    layout: grid;
-    grid-size: 4;
-    grid-columns: 13;
-    grid-rows: 8;
-    grid-gutter: 1 1;
-    padding: 1;
-    height: 1fr;
-}
-
-#memory-drawer {
-    height: auto;
-    max-height: 12;
-    border-top: solid $primary 30%;
-    padding: 1 1;
-}
-
-.mem-title {
-    height: 1;
-    margin-bottom: 1;
-}
-
-.mem-row {
-    height: 1;
-    color: $text;
-}
-
-.mem-row.-flash {
-    background: $accent 30%;
-    color: $text;
-}
-
-/* ─── AgentCard ─────────────────────────────────────────────────────────── */
-
-.agent-card {
-    width: 13;
-    height: 8;
-    border: round $primary 50%;
-    padding: 0;
-    layout: vertical;
-}
-
-.agent-card.-working {
-    border: heavy $accent;
-}
-
-.agent-card > .bubble {
-    height: 1;
-    content-align: center middle;
-    color: $accent;
-    text-style: bold;
-}
-
-.agent-card > .bubble.-hidden {
-    color: $boost;
-}
-
-.agent-card > #portrait {
-    height: 4;
-    content-align: center middle;
-}
-
-.agent-card > #name {
-    height: 1;
-    content-align: center middle;
-}
-
-.agent-card > #role {
-    height: 1;
-    content-align: center middle;
-}
-
-/* ─── InputBar (footer) ─────────────────────────────────────────────────── */
+/* ─── InputBar (footer) ────────────────────────────────────────────────── */
 
 #input-bar {
     height: 3;
@@ -215,7 +331,6 @@ SwarmComputer {
     height: 3;
     border: tall $primary;
 }
-
 #task-input:focus {
     border: tall $accent;
 }

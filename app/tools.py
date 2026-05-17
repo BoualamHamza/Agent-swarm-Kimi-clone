@@ -1,6 +1,6 @@
 """Tool schemas (OpenAI function-calling format) and the executor.
 
-Fourteen tools are available to every worker agent:
+Fifteen tools are available to every worker agent:
 
   Pure-Python tools (always available):
     - calculate                 (sandboxed math via asteval)
@@ -11,7 +11,9 @@ Fourteen tools are available to every worker agent:
     - request_handoff
 
   Web (always available):
-    - web_search                (Tavily)
+    - web_search                (Tavily — finds URLs + snippets)
+    - scrape_url                (Firecrawl — full page content as markdown;
+                                 requires FIRECRAWL_API_KEY)
 
   Sandbox tools (require an injected SwarmSandbox; otherwise return
   "sandbox unavailable"):
@@ -34,7 +36,7 @@ from typing import Any
 from asteval import Interpreter
 from langsmith import traceable
 
-from app.client import get_tavily
+from app.client import get_firecrawl, get_tavily
 from app.memory import SharedMemoryStore
 from app.sandbox import SwarmSandbox
 
@@ -107,6 +109,26 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "wait_for_memory",
+            "description": (
+                "Block until another agent writes the given key to shared memory, "
+                "then return its value. Use when your task explicitly depends on a "
+                "finding another agent must produce first. Returns the stored value "
+                "on success, or an error message if the timeout elapses."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "key":         {"type": "string",  "description": "Shared-memory key to wait for"},
+                    "timeout_sec": {"type": "integer", "description": "Max seconds to wait (1-120, default 30)", "default": 30},
+                },
+                "required": ["key"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "request_handoff",
             "description": "Signal that a different specialist agent should handle a sub-problem you discovered. Only use if the work genuinely needs a different specialization than yours.",
             "parameters": {
@@ -132,6 +154,27 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                     "max_results": {"type": "integer", "description": "How many results to return (1-10)", "default": 5},
                 },
                 "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "scrape_url",
+            "description": (
+                "Fetch the full content of a web page as clean markdown using Firecrawl. "
+                "Use this after web_search to read the actual content of a promising URL, "
+                "or when you have a direct URL and need its full text rather than a snippet."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "The full URL to scrape, e.g. 'https://example.com/article'",
+                    },
+                },
+                "required": ["url"],
             },
         },
     },
@@ -313,10 +356,17 @@ class ToolExecutor:
                 return await self._write_memory(args.get("key", ""), args.get("value", ""))
             if name == "read_shared_memory":
                 return self._read_memory(args.get("key", ""))
+            if name == "wait_for_memory":
+                return await self._wait_for_memory(
+                    args.get("key", ""),
+                    int(args.get("timeout_sec", 30)),
+                )
             if name == "request_handoff":
                 return f'Handoff to "{args.get("to_role", "?")}" registered.'
             if name == "web_search":
                 return await self._web_search(args.get("query", ""), int(args.get("max_results", 5)))
+            if name == "scrape_url":
+                return await self._scrape_url(args.get("url", ""))
             if name == "run_python":
                 return await self._run_python(args.get("code", ""), int(args.get("timeout", 30)))
             if name == "read_file":
@@ -390,6 +440,29 @@ class ToolExecutor:
             return "\n".join(f"[{k}]: {v}" for k, v in self.shared_memory.items())
         return self.shared_memory.get(key, f'Nothing found for key "{key}".')
 
+    async def _wait_for_memory(self, key: str, timeout_sec: int) -> str:
+        """Poll the shared dict for ``key`` until it appears or the timeout
+        elapses. Releases the lock between polls so writers can proceed.
+        """
+        if not key:
+            return "Error: key is required"
+        timeout_sec = max(1, min(120, timeout_sec))
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + timeout_sec
+        poll = 0.5
+        while True:
+            async with self.lock:
+                if key in self.shared_memory:
+                    return self.shared_memory[key]
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return (
+                    f'Error: timed out after {timeout_sec}s waiting for '
+                    f'shared-memory key "{key}". Either the upstream agent '
+                    f"is still working or its task didn't write that key."
+                )
+            await asyncio.sleep(min(poll, remaining))
+
     async def _web_search(self, query: str, max_results: int) -> str:
         if not query.strip():
             return "Error: query is required"
@@ -406,6 +479,27 @@ class ToolExecutor:
             snippet = (r.get("content", "") or "")[:300].replace("\n", " ")
             lines.append(f"{i}. {title}\n   {url}\n   {snippet}")
         return "\n".join(lines)
+
+    async def _scrape_url(self, url: str) -> str:
+        if not url.strip():
+            return "Error: url is required"
+        try:
+            client = get_firecrawl()
+        except RuntimeError as e:
+            return f"Error: {e}"
+        try:
+            result = await asyncio.to_thread(
+                client.scrape, url, formats=["markdown"]
+            )
+            markdown = getattr(result, "markdown", None) or ""
+            if not markdown:
+                return f"No content returned for {url}"
+            # Cap at ~8000 chars to keep context manageable
+            if len(markdown) > 8000:
+                markdown = markdown[:8000] + "\n\n[…content truncated]"
+            return markdown
+        except Exception as e:
+            return f"Error scraping {url}: {type(e).__name__}: {e}"
 
     # ─── Sandbox-backed tools ───────────────────────────────────────────────
 

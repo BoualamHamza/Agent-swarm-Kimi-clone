@@ -171,8 +171,8 @@ def _render_body(ev: ArtifactEmitted) -> str:
 class ArtifactsView(Horizontal):
     """Tabbed sub-pane: list of artifacts on the left, preview on the right."""
 
-    def __init__(self) -> None:
-        super().__init__(id="artifacts-view")
+    def __init__(self, *, id: str = "artifacts-view") -> None:
+        super().__init__(id=id)
         self.list_view = ListView(id="artifact-list")
         self.preview = ArtifactPreview()
         self._rows: list[ArtifactEmitted] = []

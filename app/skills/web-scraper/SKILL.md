@@ -1,6 +1,6 @@
 ---
 name: web-scraper
-description: Fetch web pages and extract structured data using requests and BeautifulSoup inside the sandbox
+description: INVOKE when scrape_url (Firecrawl) is unavailable, rate-limited, returns an error, OR you need custom HTML parsing logic (specific tables, selectors, multi-page traversal). Uses requests + BeautifulSoup in the sandbox. Prefer scrape_url for plain markdown extraction. Triggers — "parse HTML", "extract from page", "scrape failed", "custom scraping", "follow links".
 ---
 
 # Web Scraper

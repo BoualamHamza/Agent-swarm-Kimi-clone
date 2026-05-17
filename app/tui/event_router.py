@@ -2,15 +2,15 @@
 
 A single class consumes every SwarmEvent variant and pokes the right widgets.
 Keeping the dispatch in one file means there's exactly one place to look when
-a new event type is added in `app/state.py`.
+a new event type is added in ``app/state.py``.
 
 Spawn staggering
 ----------------
 The orchestrator returns all AgentSpec rows in a single batch, so the
-underlying event stream emits `agent_spawned` events in rapid succession.
-We pace them out visually with `_SPAWN_STAGGER` between reveals so the user
-sees agents *arrive* one at a time. Events targeting an agent that hasn't
-been revealed yet are buffered and replayed when the reveal fires.
+underlying event stream emits ``agent_spawned`` events in rapid succession.
+We pace them out visually with ``_SPAWN_STAGGER`` between reveals so the user
+sees agents arrive one at a time. Events targeting an agent that hasn't been
+revealed yet are buffered and replayed when the reveal fires.
 """
 from __future__ import annotations
 
@@ -39,7 +39,6 @@ if TYPE_CHECKING:
     from app.tui.main import SwarmApp
 
 
-# Seconds between consecutive agent reveals during a burst.
 _SPAWN_STAGGER = 0.6
 
 
@@ -49,10 +48,7 @@ class EventRouter:
     def __init__(self, app: SwarmApp) -> None:
         self.app = app
         self.pool = AvatarPool()
-        # Track originator ids in order — used to pair handoff phase-3 spawns
-        # with their phase-2 originator so we can draw the arrow.
         self._handoff_origins: list[str] = []
-        # Staggered-spawn bookkeeping.
         self._revealed: set[str] = set()
         self._pending: dict[str, list[SwarmEvent]] = {}
         self._next_reveal_at: float = 0.0
@@ -64,7 +60,6 @@ class EventRouter:
         handler = self._handlers.get(kind)
         if handler is None:
             return
-        # Buffer agent-targeted events that arrive before the visual reveal.
         if kind != "agent_spawned":
             agent_id = getattr(ev, "agent_id", None)
             if agent_id is not None and agent_id not in self._revealed:
@@ -72,22 +67,44 @@ class EventRouter:
                 return
         handler(self, ev)
 
-    # ─── Individual handlers ────────────────────────────────────────────────
+    # ─── Convenience: agent-coloured log line ───────────────────────────────
+
+    def _log_line(self, agent_id: str | None, text: str) -> None:
+        sc = self.app.swarm_computer
+        if agent_id is None:
+            sc.logs.write(f"[dim]{text}[/dim]")
+            return
+        char = self.pool.lookup(agent_id)
+        if char is None:
+            sc.logs.write(f"[{agent_id}] {text}")
+            return
+        sc.logs.write(f"[{char.accent}]\\[{char.name}][/{char.accent}] {text}")
+
+    # ─── Handlers ──────────────────────────────────────────────────────────
 
     def _on_phase_start(self, ev: PhaseStart) -> None:
-        self.app.swarm_computer.header.set_phase(ev.phase)
+        self.app.swarm_header.set_phase(ev.phase)
+        if ev.phase == "complete":
+            self._log_line(None, "── swarm complete ──")
+            try:
+                self.app.notify("Swarm complete", title="Phase", timeout=3)
+            except Exception:
+                pass
+        else:
+            self._log_line(None, f"── phase: {ev.phase} ──")
 
     def _on_reasoning(self, ev: OrchestratorReasoning) -> None:
         self.app.chat_pane.set_thinking(ev.reasoning)
+        self._log_line(None, f"orchestrator: {ev.reasoning}")
 
     def _on_spawned(self, ev: AgentSpawned) -> None:
-        # Compute the visual reveal time so spawns trickle in.
+        # Track header `queued` immediately so the dashboard updates before
+        # the visual stagger reveals the pill.
+        self.app.swarm_header.increment_queued()
         now = monotonic()
         target = max(now, self._next_reveal_at)
         delay = target - now
         self._next_reveal_at = target + _SPAWN_STAGGER
-        # If the gap is essentially zero, just reveal synchronously to avoid
-        # an unnecessary frame of latency.
         if delay <= 0.01:
             self._reveal_agent(ev)
         else:
@@ -95,88 +112,116 @@ class EventRouter:
 
     def _reveal_agent(self, ev: AgentSpawned) -> None:
         char = self.pool.assign(ev.spec.id)
-        self.app.swarm_computer.grid.add_agent(ev.spec.id, char, ev.spec.role)
-        self.app.swarm_computer.header.increment_spawned()
+        sc = self.app.swarm_computer
+        sc.strip.add_agent(ev.spec.id, char, ev.spec.role)
+        sc.agent_detail.register(ev.spec.id, char, ev.spec.role)
         self.app.chat_pane.roster.add_agent(
             ev.spec.id, char.name, ev.spec.role, ev.spec.task,
         )
-        # Handoff arrow if this is a Phase-3 agent.
         if ev.is_handoff and self._handoff_origins:
             origin_id = self._handoff_origins.pop(0)
-            self.app.swarm_computer.grid.draw_handoff(origin_id, ev.spec.id)
-        # Drain any events that arrived for this agent before reveal.
+            sc.strip.draw_handoff(origin_id, ev.spec.id)
         self._revealed.add(ev.spec.id)
+        self._log_line(ev.spec.id, f"spawned · {ev.spec.role}")
         for buffered in self._pending.pop(ev.spec.id, []):
             self.dispatch(buffered)
 
     def _on_running(self, ev: AgentRunning) -> None:
-        card = self.app.swarm_computer.grid.get_card(ev.agent_id)
-        if card is not None:
-            card.working = True
-            card.set_status("●")
+        pill = self.app.swarm_computer.strip.get_pill(ev.agent_id)
+        if pill is not None:
+            pill.status = "running"
         row = self.app.chat_pane.roster.get_row(ev.agent_id)
         if row is not None:
             row.mark_running()
+        self.app.swarm_header.mark_running()
+        self.app.swarm_computer.agent_detail.trace_running(ev.agent_id)
+        self._log_line(ev.agent_id, "running")
 
     def _on_tool_call(self, ev: ToolCallEvent) -> None:
-        card = self.app.swarm_computer.grid.get_card(ev.agent_id)
-        if card is not None:
-            card.show_bubble(ev.name, _short_input(ev.input))
+        snippet = _short_input(ev.input)
         row = self.app.chat_pane.roster.get_row(ev.agent_id)
         if row is not None:
             row.bump_progress()
+        self.app.swarm_computer.agent_detail.trace_tool_call(
+            ev.agent_id, ev.name, snippet
+        )
+        suffix = f" {snippet}" if snippet else ""
+        self._log_line(ev.agent_id, f"→ {ev.name}{suffix}")
 
     def _on_tool_result(self, ev: ToolResultEvent) -> None:
-        # Bubble naturally times out — no-op unless we wanted to flag errors.
-        return
+        # Truncate the tool result so RichLog doesn't get a 4KB blob per line.
+        snippet = (ev.result or "").replace("\n", " ⏎ ")
+        if len(snippet) > 120:
+            snippet = snippet[:119] + "…"
+        self.app.swarm_computer.agent_detail.trace_tool_result(
+            ev.agent_id, ev.name, snippet or "ok"
+        )
+        self._log_line(ev.agent_id, f"  ← {ev.name}: {snippet}")
 
     def _on_memory_write(self, ev: MemoryWrite) -> None:
         self.app.swarm_computer.memory.upsert(ev.key, ev.value)
+        self._log_line(ev.agent_id, f"memory[{ev.key}] ← {ev.value[:40]}")
 
     def _on_handoff_requested(self, ev: HandoffRequested) -> None:
-        card = self.app.swarm_computer.grid.get_card(ev.agent_id)
-        if card is not None:
-            card.show_bubble("request_handoff", ev.handoff.to_role, ttl=2.4)
+        self._log_line(
+            ev.agent_id,
+            f"requesting handoff → {ev.handoff.to_role}: {ev.handoff.reason}",
+        )
 
     def _on_complete(self, ev: AgentComplete) -> None:
-        card = self.app.swarm_computer.grid.get_card(ev.agent_id)
-        if card is not None:
-            card.working = False
-            card.set_status("✓" if ev.status == "ok" else "✗")
+        pill = self.app.swarm_computer.strip.get_pill(ev.agent_id)
+        if pill is not None:
+            pill.status = "done" if ev.status == "ok" else "error"
         row = self.app.chat_pane.roster.get_row(ev.agent_id)
         if row is not None:
             if ev.status == "ok":
                 row.mark_complete()
             else:
                 row.mark_error()
-        self.app.swarm_computer.header.increment_completed()
+        self.app.swarm_header.increment_completed()
+        self.app.swarm_computer.agent_detail.trace_complete(ev.agent_id, ev.status)
+        name = self.pool.lookup(ev.agent_id)
+        if name is not None:
+            try:
+                self.app.notify(f"{name.name} finished", title="Agent", timeout=2)
+            except Exception:
+                pass
+        self._log_line(ev.agent_id, f"complete · {ev.status}")
 
     def _on_handed_off(self, ev: AgentHandedOff) -> None:
-        card = self.app.swarm_computer.grid.get_card(ev.agent_id)
-        if card is not None:
-            card.working = False
-            card.set_status("↦")
+        pill = self.app.swarm_computer.strip.get_pill(ev.agent_id)
+        if pill is not None:
+            pill.status = "handoff"
         row = self.app.chat_pane.roster.get_row(ev.agent_id)
         if row is not None:
             row.mark_handoff()
-        self.app.swarm_computer.header.increment_completed()
-        # Queue the originator for the next is_handoff=True spawn.
+        self.app.swarm_header.increment_completed()
+        self.app.swarm_computer.agent_detail.trace_handoff(
+            ev.agent_id, ev.handoff.to_role
+        )
         self._handoff_origins.append(ev.agent_id)
+        self._log_line(ev.agent_id, f"handed off → {ev.handoff.to_role}")
 
     def _on_final(self, ev: FinalResult) -> None:
         self.app.chat_pane.set_answer(ev.text)
-        # Clear the thinking line — the answer subsumes it.
         self.app.chat_pane.set_thinking("")
+        # Promote the final answer to the Preview tab so it gets the big space.
+        try:
+            self.app.swarm_computer.preview.update(ev.text)
+        except Exception:
+            pass
+        self._log_line(None, "final answer ready")
 
     def _on_artifact(self, ev: ArtifactEmitted) -> None:
-        self.app.swarm_computer.artifacts_view.add(ev)
-        # First artifact auto-switches to the artifacts tab so the user
-        # immediately sees their deliverable land.
-        if len(self.app.swarm_computer.artifacts_view._rows) == 1:
-            self.app.swarm_computer.show_artifacts()
+        sc = self.app.swarm_computer
+        sc.artifacts_view.add(ev)
+        if len(sc.artifacts_view._rows) == 1:
+            sc.show_artifacts()
+        self._log_line(None, f"artifact · {ev.title} ({ev.mime_type})")
 
     def _on_error(self, ev: ErrorEvent) -> None:
         self.app.chat_pane.set_thinking(f"[b red]Error:[/b red] {ev.message}")
+        self._log_line(None, f"[red]error: {ev.message}[/red]")
 
     _handlers: dict[str, Any] = {
         "phase_start":           _on_phase_start,
@@ -196,17 +241,15 @@ class EventRouter:
 
 
 def _short_input(d: dict[str, Any]) -> str:
-    """Compact a tool input dict for the speech bubble (just one key value)."""
+    """Compact a tool input dict for the log line / agent detail."""
     if not d:
         return ""
-    # Prefer common keys.
-    for key in ("query", "expression", "key", "to_role", "code"):
+    for key in ("query", "expression", "key", "to_role", "code", "path"):
         if key in d:
             val = str(d[key]).replace("\n", " ")
-            return val[:24]
-    # Fallback: first value.
+            return val[:48]
     try:
         val = str(next(iter(d.values()))).replace("\n", " ")
-        return val[:24]
+        return val[:48]
     except StopIteration:
         return ""

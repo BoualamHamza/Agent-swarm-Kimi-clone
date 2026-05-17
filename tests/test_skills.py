@@ -4,14 +4,14 @@ from __future__ import annotations
 import pytest
 
 
-def test_load_skills_finds_all_five():
+def test_load_skills_finds_all_bundled():
     from app.skills_loader import load_skills
 
     skills = load_skills()
     names = {s.name for s in skills}
     assert names == {
         "python-runner", "data-analyst", "file-manager",
-        "web-scraper", "data-vulgariser",
+        "web-scraper", "data-vulgariser", "financial-analyst",
     }
 
 
@@ -39,7 +39,7 @@ def test_skills_prompt_section_mentions_every_skill():
     text = skills_prompt_section()
     for name in (
         "python-runner", "data-analyst", "file-manager",
-        "web-scraper", "data-vulgariser",
+        "web-scraper", "data-vulgariser", "financial-analyst",
     ):
         assert name in text, f"prompt section missing {name}"
     assert "/home/user/skills/" in text
