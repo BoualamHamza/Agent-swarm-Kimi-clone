@@ -6,21 +6,23 @@ A multi-agent system where a planner decomposes a task into specialists, runs th
 
 ## What It Is
 
-Agents run concurrently, read each other's findings through a shared key-value store, and can spawn new specialists mid-flight when they hit work outside their role. Inspired by Moonshot's Kimi K2.5 and its Parallel-Agent Reinforcement Learning (PARL) approach.
+Agents run concurrently and read each other's findings through a shared key-value store. Inspired by Moonshot's Kimi K2.5 and its Parallel-Agent Reinforcement Learning (PARL) approach.
 
 | Pattern | Behavior |
 | --- | --- |
 | Single Agent | One LLM, sequential |
 | Parallel Sub-agents | N agents, no coordination |
-| Agent Swarm | Parallel + shared memory + dynamic handoffs |
+| Agent Swarm | Parallel + shared memory |
 
 ## Core Concepts
 
 - **Orchestrator** — a single planning LLM call with no tools. Reads the task and emits a JSON manifest of workers (name, role, task).
-- **Worker** — an LLM call with tools. Reads shared memory before acting, writes findings, can request a handoff.
-- **Handoff Agent** — a worker spawned at runtime when an existing worker flags out-of-scope work.
+- **Worker** — an LLM call with tools. Reads shared memory before acting, writes findings as it works, sees what other workers have written.
 - **Shared Memory** — key-value store visible to every agent; the mechanism that turns parallel workers into a swarm.
+- **Sandbox** — an E2B-backed execution environment shared across the swarm for Python, shell, and file operations.
 - **Aggregator** — final LLM call (no tools) that synthesizes worker outputs and memory into one answer.
+
+Workers have access to: `calculate`, `get_current_date`, `read_shared_memory`, `write_to_shared_memory`, `wait_for_memory`, `web_search`, `scrape_url`, `run_python`, `read_file`, `write_file`, `edit_file`, `list_files`, `glob_files`, `grep_files`, `run_shell`.
 
 Example orchestrator output:
 
@@ -37,7 +39,7 @@ Example orchestrator output:
 
 ## TUI — `agent-swarm`
 
-A Textual terminal UI is the primary entry point. Type a task and watch a roster of named agents spawn, call tools, write to shared memory, hand off to specialists, and produce a final answer.
+A Textual terminal UI is the primary entry point. Type a task and watch a roster of named agents spawn, call tools, write to shared memory, and produce a final answer.
 
 ```bash
 pip install -e .
