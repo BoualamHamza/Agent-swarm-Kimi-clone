@@ -19,13 +19,11 @@ from typing import TYPE_CHECKING, Any
 
 from app.state import (
     AgentComplete,
-    AgentHandedOff,
     AgentRunning,
     AgentSpawned,
     ArtifactEmitted,
     ErrorEvent,
     FinalResult,
-    HandoffRequested,
     MemoryWrite,
     OrchestratorReasoning,
     PhaseStart,
@@ -48,7 +46,6 @@ class EventRouter:
     def __init__(self, app: SwarmApp) -> None:
         self.app = app
         self.pool = AvatarPool()
-        self._handoff_origins: list[str] = []
         self._revealed: set[str] = set()
         self._pending: dict[str, list[SwarmEvent]] = {}
         self._next_reveal_at: float = 0.0
@@ -118,9 +115,6 @@ class EventRouter:
         self.app.chat_pane.roster.add_agent(
             ev.spec.id, char.name, ev.spec.role, ev.spec.task,
         )
-        if ev.is_handoff and self._handoff_origins:
-            origin_id = self._handoff_origins.pop(0)
-            sc.strip.draw_handoff(origin_id, ev.spec.id)
         self._revealed.add(ev.spec.id)
         self._log_line(ev.spec.id, f"spawned · {ev.spec.role}")
         for buffered in self._pending.pop(ev.spec.id, []):
@@ -162,12 +156,6 @@ class EventRouter:
         self.app.swarm_computer.memory.upsert(ev.key, ev.value)
         self._log_line(ev.agent_id, f"memory[{ev.key}] ← {ev.value[:40]}")
 
-    def _on_handoff_requested(self, ev: HandoffRequested) -> None:
-        self._log_line(
-            ev.agent_id,
-            f"requesting handoff → {ev.handoff.to_role}: {ev.handoff.reason}",
-        )
-
     def _on_complete(self, ev: AgentComplete) -> None:
         pill = self.app.swarm_computer.strip.get_pill(ev.agent_id)
         if pill is not None:
@@ -187,20 +175,6 @@ class EventRouter:
             except Exception:
                 pass
         self._log_line(ev.agent_id, f"complete · {ev.status}")
-
-    def _on_handed_off(self, ev: AgentHandedOff) -> None:
-        pill = self.app.swarm_computer.strip.get_pill(ev.agent_id)
-        if pill is not None:
-            pill.status = "handoff"
-        row = self.app.chat_pane.roster.get_row(ev.agent_id)
-        if row is not None:
-            row.mark_handoff()
-        self.app.swarm_header.increment_completed()
-        self.app.swarm_computer.agent_detail.trace_handoff(
-            ev.agent_id, ev.handoff.to_role
-        )
-        self._handoff_origins.append(ev.agent_id)
-        self._log_line(ev.agent_id, f"handed off → {ev.handoff.to_role}")
 
     def _on_final(self, ev: FinalResult) -> None:
         self.app.chat_pane.set_answer(ev.text)
@@ -231,9 +205,7 @@ class EventRouter:
         "tool_call":             _on_tool_call,
         "tool_result":           _on_tool_result,
         "memory_write":          _on_memory_write,
-        "handoff_requested":     _on_handoff_requested,
         "agent_complete":        _on_complete,
-        "agent_handed_off":      _on_handed_off,
         "final_result":          _on_final,
         "artifact_emitted":      _on_artifact,
         "error":                 _on_error,

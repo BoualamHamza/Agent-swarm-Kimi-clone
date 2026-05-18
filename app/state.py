@@ -1,4 +1,4 @@
-"""Pydantic state types — orchestrator output, agent records, swarm events.
+"""Pydantic state types — orchestrator I/O, worker records, swarm events.
 
 SwarmEvent is a discriminated union; consumers (SSE clients, tests) dispatch on
 the `type` field. Each event self-describes via Literal type tags.
@@ -15,11 +15,13 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-# ─── Orchestrator output ─────────────────────────────────────────────────────
+# ─── Worker spec ─────────────────────────────────────────────────────────────
 
 
 class AgentSpec(BaseModel):
-    id: str = Field(description="Short unique id like 'a1'")
+    """A single worker definition. ``id`` is assigned by the swarm when the
+    worker is spawned (orchestrator does not pick it)."""
+    id: str = Field(description="Short unique id like 'w3'")
     name: str = Field(description="Short PascalCase agent name")
     role: str = Field(description="One-line specialist description")
     task: str = Field(description="Specific subtask to execute")
@@ -28,18 +30,19 @@ class AgentSpec(BaseModel):
     skills: list[str] | None = None
 
 
-class OrchestratorOutput(BaseModel):
-    reasoning: str
-    agents: list[AgentSpec]
+class WorkerSpec(BaseModel):
+    """The shape the orchestrator emits inside `spawn_workers(specs=[...])`.
+
+    Identical to AgentSpec minus `id` — the swarm assigns ids centrally so the
+    orchestrator never has to track them.
+    """
+    name: str = Field(description="Short PascalCase agent name")
+    role: str = Field(description="One-line specialist description")
+    task: str = Field(description="Specific subtask to execute")
+    skills: list[str] | None = None
 
 
 # ─── Worker primitives ───────────────────────────────────────────────────────
-
-
-class Handoff(BaseModel):
-    to_role: str
-    reason: str
-    context: str
 
 
 class ToolCallRecord(BaseModel):
@@ -49,8 +52,8 @@ class ToolCallRecord(BaseModel):
 
 
 # Outcome of a single worker / loop run. Distinguishes "produced a real answer"
-# from soft-failure modes so the aggregator can ignore garbage text and the SSE
-# stream can surface the failure.
+# from soft-failure modes so the orchestrator can ignore garbage text and the
+# SSE stream can surface the failure.
 WorkerStatus = Literal[
     "ok",                # produced a final text response
     "max_iterations",    # exhausted iteration cap mid-tool-loop
@@ -64,9 +67,7 @@ class WorkerResult(BaseModel):
     spec: AgentSpec
     text: str
     status: WorkerStatus = "ok"
-    handoff: Handoff | None = None
     tool_calls: list[ToolCallRecord] = Field(default_factory=list)
-    is_handoff: bool = False  # True if this worker was itself a handoff agent
 
 
 class LoopOutcome(BaseModel):
@@ -74,8 +75,26 @@ class LoopOutcome(BaseModel):
     without breaking call sites."""
     text: str
     status: WorkerStatus
-    handoff: Handoff | None = None
     tool_calls: list[ToolCallRecord] = Field(default_factory=list)
+
+
+class SpawnSummary(BaseModel):
+    """Per-worker summary returned to the orchestrator from `spawn_workers`.
+
+    Only the short summary (the worker's final assistant text) travels back to
+    the orchestrator — full worker output stays in shared memory under
+    `worker:<agent_id>:output`.
+    """
+    agent_id: str
+    name: str
+    role: str
+    status: WorkerStatus
+    summary: str
+
+
+class SpawnResult(BaseModel):
+    """Aggregate result of one `spawn_workers` tool call."""
+    workers: list[SpawnSummary]
 
 
 # ─── Swarm events (discriminated union) ──────────────────────────────────────
@@ -87,7 +106,10 @@ class _EventBase(BaseModel):
 
 class PhaseStart(_EventBase):
     type: Literal["phase_start"] = "phase_start"
-    phase: Literal["orchestrating", "executing", "handoffs", "aggregating", "complete"]
+    # Free-form so the orchestrator can emit phases like
+    # "orchestrator-iteration-1", "orchestrator-iteration-2", etc.
+    # Well-known values: "orchestrating", "executing", "complete".
+    phase: str
 
 
 class OrchestratorReasoning(_EventBase):
@@ -98,6 +120,7 @@ class OrchestratorReasoning(_EventBase):
 class AgentSpawned(_EventBase):
     type: Literal["agent_spawned"] = "agent_spawned"
     spec: AgentSpec
+    # Retained for back-compat with the TUI; the new orchestrator always sets False.
     is_handoff: bool = False
 
 
@@ -127,12 +150,6 @@ class MemoryWrite(_EventBase):
     value: str
 
 
-class HandoffRequested(_EventBase):
-    type: Literal["handoff_requested"] = "handoff_requested"
-    agent_id: str
-    handoff: Handoff
-
-
 class AgentComplete(_EventBase):
     type: Literal["agent_complete"] = "agent_complete"
     agent_id: str
@@ -140,23 +157,16 @@ class AgentComplete(_EventBase):
     status: WorkerStatus = "ok"
 
 
-class AgentHandedOff(_EventBase):
-    type: Literal["agent_handed_off"] = "agent_handed_off"
-    agent_id: str
-    text: str
-    handoff: Handoff
-
-
 class FinalResult(_EventBase):
     type: Literal["final_result"] = "final_result"
     text: str
     agents_total: int
-    handoffs_total: int
-    memory_entries: int
+    iterations_total: int = 0
+    memory_entries: int = 0
 
 
 class ArtifactEmitted(_EventBase):
-    """A user-facing deliverable harvested from the sandbox after aggregation.
+    """A user-facing deliverable harvested from the sandbox after the loop terminates.
 
     The conductor downloads each file from ``/home/user/workspace/artifacts/``
     to ``~/.agent-swarm/artifacts/{session_id}/`` and emits one of these per
@@ -186,9 +196,7 @@ SwarmEvent = Annotated[
         ToolCallEvent,
         ToolResultEvent,
         MemoryWrite,
-        HandoffRequested,
         AgentComplete,
-        AgentHandedOff,
         FinalResult,
         ArtifactEmitted,
         ErrorEvent,

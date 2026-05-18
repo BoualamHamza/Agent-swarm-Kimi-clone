@@ -233,6 +233,17 @@ class SwarmSandbox:
                 pass
         await self._sandbox.files.write(resolved, content)
 
+    async def upload_bytes(self, path: str, content: bytes) -> None:
+        """Write a binary file ensuring parent dirs exist."""
+        resolved = self._resolve(path)
+        parent = os.path.dirname(resolved)
+        if parent:
+            try:
+                await self._sandbox.files.make_dir(parent)
+            except Exception:
+                pass
+        await self._sandbox.files.write(resolved, content)
+
     async def list_files(self, path: str = "") -> list[dict]:
         """Alias for :meth:`ls` — kept separate so the artifact harvester has
         a stable name to grep for."""

@@ -53,7 +53,6 @@ async def test_loop_terminates_with_no_tool_use():
     )
     assert out.text == "Hello, no tools."
     assert out.status == "ok"
-    assert out.handoff is None
     assert out.tool_calls == []
 
 
@@ -77,39 +76,10 @@ async def test_loop_executes_tool_then_terminates():
     )
     assert out.text == "Done."
     assert out.status == "ok"
-    assert out.handoff is None
     assert mem == {"k": "v"}
     assert len(out.tool_calls) == 1
     assert out.tool_calls[0].name == "write_to_shared_memory"
     assert out.tool_calls[0].input == {"key": "k", "value": "v"}
-
-
-@pytest.mark.asyncio
-@respx.mock
-async def test_loop_captures_handoff_input():
-    route = respx.post(OPENROUTER)
-    route.side_effect = [
-        httpx.Response(200, json=_completion(
-            content="Partial result.",
-            tool_calls=[_tc("c1", "request_handoff", {
-                "to_role": "tax specialist",
-                "reason":  "EU VAT is out of my expertise",
-                "context": "Compute VAT for Germany on the proposed pricing.",
-            })],
-            finish="tool_calls",
-        )),
-        httpx.Response(200, json=_completion(content="Partial result.", finish="stop")),
-    ]
-
-    out = await tool_use_loop(
-        agent_id="a1", model="x/y", system="sys", user="hi",
-        tools=TOOL_SCHEMAS, shared_memory={}, lock=asyncio.Lock(),
-    )
-    assert out.handoff is not None
-    assert out.handoff.to_role == "tax specialist"
-    assert "VAT" in out.handoff.reason
-    assert "Germany" in out.handoff.context
-    assert any(r.name == "request_handoff" for r in out.tool_calls)
 
 
 @pytest.mark.asyncio

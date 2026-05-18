@@ -33,18 +33,33 @@ def main() -> int:
         Template()
         .from_python_image("3.12")
         .pip_install([
+            # Data + analysis
             "pandas",
             "numpy",
             "matplotlib",
+            "scipy",
+            "tabulate",
+            "yfinance",
+            # Web
             "requests",
             "beautifulsoup4",
             "lxml",
-            "tabulate",
-            "scipy",
-            "yfinance",
+            # xlsx skill
             "openpyxl",
+            "xlsxwriter",
+            # pptx skill
+            "python-pptx",
+            "Pillow",
+            "markitdown[pptx]",
         ])
-        .apt_install(["ripgrep", "curl", "git", "jq"])
+        .apt_install([
+            "ripgrep", "curl", "git", "jq",
+            # xlsx/pptx skills need LibreOffice for formula recalc + slide rendering,
+            # and poppler-utils for the PDF -> JPG step used in pptx visual QA.
+            "libreoffice",
+            "poppler-utils",
+            "fonts-liberation",
+        ])
         .make_dir("/home/user/workspace")
         .make_dir("/home/user/workspace/artifacts")
         .make_dir("/home/user/skills")
