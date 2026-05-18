@@ -63,3 +63,7 @@ Each worker is assigned a stable character at spawn (Hemingway, Cyclops, Hypatia
 | `demo.py` | Scripted event stream for `--demo` |
 | `styles.tcss` | Layout, colors, glow class |
 | `widgets/` | `AgentGrid`, `AgentCard`, `MemoryDrawer`, `ChatPane`, `SwarmComputer`, `InputBar` |
+
+
+**Note**
+Due to budget constraints, I had to fix caps on the number of subagents spawned, the number of tool calls of each worker and the number of agents runing in paralel but you can adapt this into your case ,  you can do this in the (`app/orchestrator.py`) and (`app/loop.py`). if you want you can also switch models 
