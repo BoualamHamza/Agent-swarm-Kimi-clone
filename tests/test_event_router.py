@@ -36,12 +36,11 @@ async def test_every_event_type_dispatches_without_error():
             app.router.dispatch(ev)  # type: ignore[union-attr]
         await pilot.pause(0.5)
 
-    # All 12 non-error variants should appear in the scripted demo.
+    # All non-error variants emitted by the new scripted demo.
     expected = {
         "phase_start", "orchestrator_reasoning", "agent_spawned", "agent_running",
-        "tool_call", "tool_result", "memory_write", "handoff_requested",
-        "agent_complete", "agent_handed_off", "final_result",
-        "artifact_emitted",
+        "tool_call", "tool_result", "memory_write",
+        "agent_complete", "final_result", "artifact_emitted",
     }
     assert expected.issubset(seen_types), f"missing: {expected - seen_types}"
     # The router knows about every type the demo emits plus the error variant.

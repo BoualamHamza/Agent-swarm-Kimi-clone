@@ -85,7 +85,7 @@ def test_all_schemas_registered():
     expected = {
         "calculate", "get_current_date",
         "write_to_shared_memory", "read_shared_memory", "wait_for_memory",
-        "request_handoff", "web_search", "scrape_url",
+        "web_search", "scrape_url",
         "run_python",
         "read_file", "write_file", "edit_file",
         "list_files", "glob_files", "grep_files", "run_shell",

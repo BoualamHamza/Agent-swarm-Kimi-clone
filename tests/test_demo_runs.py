@@ -17,18 +17,13 @@ async def test_demo_runs_to_completion():
 
     header = app.swarm_header
     assert header._phase == "complete"
-    assert header._spawned == 5            # 4 phase-2 + 1 phase-3 handoff
+    assert header._spawned == 5            # 4 research + 1 reconciler across 2 iterations
     assert header._completed == 5
-    assert set(app.swarm_computer.strip._pills.keys()) == {"a1", "a2", "a3", "a4", "h1"}
+    assert set(app.swarm_computer.strip._pills.keys()) == {"w1", "w2", "w3", "w4", "w5"}
     assert set(app.swarm_computer.memory._rows.keys()) == {
         "arithmetic_problems", "algebra_problems", "geometry_problems", "calculus_problem",
     }
-    assert set(app.chat_pane.roster._rows.keys()) == {"a1", "a2", "a3", "a4", "h1"}
-    # The handoff label was applied to the originator (a2) — it should display
-    # an arrow to the handoff target's name.
-    src_pill = app.swarm_computer.strip.get_pill("a2")
-    assert src_pill is not None
-    assert src_pill.role.startswith("↦")
+    assert set(app.chat_pane.roster._rows.keys()) == {"w1", "w2", "w3", "w4", "w5"}
     # Demo emits two scripted artifacts at the end of the run; they're
     # surfaced in the right-pane Artifacts tab.
     view = app.swarm_computer.artifacts_view

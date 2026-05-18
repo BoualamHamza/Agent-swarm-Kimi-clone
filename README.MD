@@ -1,130 +1,65 @@
-## 1. What Is an Agent Swarm?
+# Agent Swarm
 
-An **agent swarm** is a multi-agent system where multiple AI agents work in parallel on sub-tasks, communicate with each other through shared state, and can dynamically redirect work to newly spawned specialists mid-execution.
+A multi-agent system where a planner decomposes a task into specialists, runs them in parallel with shared memory, and synthesizes their findings into a single answer.
 
-It is distinct from two simpler patterns:
+![Agent Swarm TUI](swarm_demo.png)
 
-| Pattern                   | Description                                                        | Limitation                                      |
-| ------------------------- | ------------------------------------------------------------------ | ----------------------------------------------- |
-| **Single Agent**          | One LLM handles everything sequentially                            | Slow; bottlenecked by context                   |
-| **N Parallel Sub-agents** | N agents run the same task on N slices of data                     | Agents are blind to each other; no coordination |
-| **Agent Swarm**           | Agents run in parallel, share findings, and route work dynamically | More complex, but genuinely collaborative       |
+## What It Is
 
-The key difference between N sub-agents and a swarm is **rich inter-agent communication that can change the execution graph mid-flight**. Agents are not isolated — they read each other's findings and can spawn new peers when they discover work outside their specialization.
+Agents run concurrently, read each other's findings through a shared key-value store, and can spawn new specialists mid-flight when they hit work outside their role. Inspired by Moonshot's Kimi K2.5 and its Parallel-Agent Reinforcement Learning (PARL) approach.
 
-### Inspiration: Kimi K2.5
+| Pattern | Behavior |
+| --- | --- |
+| Single Agent | One LLM, sequential |
+| Parallel Sub-agents | N agents, no coordination |
+| Agent Swarm | Parallel + shared memory + dynamic handoffs |
 
-This architecture is inspired by Moonshot AI's Kimi K2.5 agent swarm, which trains parallelism as a skill using **Parallel-Agent Reinforcement Learning (PARL)**. Key properties we replicate:
+## Core Concepts
 
-- The **model decides** how many agents to spawn (not the engineer)
-- Sub-agents are **frozen workers** dispatched on demand
-- An internal **scheduling mechanism** manages concurrency
-- Agents share a **common information space**
-- The system can **decide not to parallelize** when a task doesn't warrant it
+- **Orchestrator** — a single planning LLM call with no tools. Reads the task and emits a JSON manifest of workers (name, role, task).
+- **Worker** — an LLM call with tools. Reads shared memory before acting, writes findings, can request a handoff.
+- **Handoff Agent** — a worker spawned at runtime when an existing worker flags out-of-scope work.
+- **Shared Memory** — key-value store visible to every agent; the mechanism that turns parallel workers into a swarm.
+- **Aggregator** — final LLM call (no tools) that synthesizes worker outputs and memory into one answer.
 
----
-
-## 2. Core Concepts
-
-### Orchestrator
-
-The **Orchestrator** is a single LLM call that receives the user's task and decides how to decompose it. It defines:
-
-- How many worker agents to spawn (typically 3–5)
-- Each agent's name, role, and specific sub-task
-- The reasoning behind the decomposition
-
-The Orchestrator does **not** have tools. It is purely a planning step. Its output is a JSON manifest of agents.
+Example orchestrator output:
 
 ```json
 {
-  "reasoning": "This task requires parallel analysis of three independent dimensions.",
+  "reasoning": "Three independent dimensions to analyze in parallel.",
   "agents": [
-    {
-      "id": "a1",
-      "name": "MarketAnalyst",
-      "role": "market sizing and competitive landscape",
-      "task": "Analyze the TAM, SAM, SOM and key competitors for a B2B SaaS product"
-    },
-    {
-      "id": "a2",
-      "name": "TechArchitect",
-      "role": "technical feasibility and stack selection",
-      "task": "Evaluate build vs buy, recommended stack, and infrastructure costs"
-    },
-    {
-      "id": "a3",
-      "name": "RiskAssessor",
-      "role": "risk identification and mitigation",
-      "task": "Identify top 5 risks and propose mitigations for a Series A fintech startup"
-    }
+    { "id": "a1", "name": "MarketAnalyst",  "role": "market sizing",        "task": "TAM/SAM/SOM and competitors for B2B SaaS" },
+    { "id": "a2", "name": "TechArchitect",  "role": "technical feasibility", "task": "Build vs buy, stack, infra cost" },
+    { "id": "a3", "name": "RiskAssessor",   "role": "risk identification",   "task": "Top 5 risks and mitigations" }
   ]
 }
 ```
 
-### Worker Agent
+## TUI — `agent-swarm`
 
-A **Worker Agent** is an LLM call with tools. Each worker:
-
-- Has a defined role and a specific task
-- Is aware of the full swarm (knows other agents' names and roles)
-- Starts by reading shared memory to see what others have found
-- Writes its own findings to shared memory
-- Can request a handoff if it discovers work outside its specialty
-
-### Handoff Agent
-
-A **Handoff Agent** is a new worker spawned **dynamically at runtime** because a worker flagged work requiring a different specialist. It:
-
-- Receives the originating agent's partial result as context
-- Reads the full shared memory to understand the swarm's state
-- Runs with the same tool set as a regular worker
-
-### Shared Memory
-
-A **key-value store** visible to all agents simultaneously. Any agent can write findings; any agent can read all findings. This is the mechanism that transforms independent parallel workers into a coordinated swarm.
-
-### Aggregator
-
-A final LLM call (no tools) that receives all worker and handoff results plus the shared memory dump, and synthesizes them into a single coherent answer.
-
----
-
-## 3. The TUI — `agent-swarm`
-
-A Textual-based terminal UI ships as the primary user-facing entry point. Like Claude Code but for swarms: type a task, watch a roster of named pixel-art agents spawn, call tools, write to shared memory, hand off to specialists, and produce a final answer.
+A Textual terminal UI is the primary entry point. Type a task and watch a roster of named agents spawn, call tools, write to shared memory, hand off to specialists, and produce a final answer.
 
 ```bash
 pip install -e .
-agent-swarm              # interactive — type a task, swarm runs in-process
-agent-swarm --demo       # scripted demo, no API keys required
+agent-swarm           # interactive
+agent-swarm --demo    # scripted demo, no API keys needed
 ```
 
-Each worker is assigned a stable Character at spawn from a curated pool (Hemingway, Cyclops, Hypatia, Riemann, Heisenberg, Shannon, Ada, …) — the orchestrator's functional name (`MarketAnalyst`, `TechArchitect`) is preserved in tooltips and the underlying `AgentSpec`. The display layer is purely cosmetic; the swarm runtime is untouched.
+Each worker is assigned a stable character at spawn (Hemingway, Cyclops, Hypatia, Riemann, Heisenberg, Shannon, Ada, ...). The orchestrator's functional name is preserved in tooltips and the underlying `AgentSpec`. The display layer is cosmetic; the swarm runtime is untouched.
 
 **Layout**
 
-- **Left pane** — task, orchestrator thinking, per-agent progress roster, final answer.
-- **Right pane** — the "Swarm Computer": phase indicator, agent grid with portraits, live shared-memory drawer.
-- **Bottom** — input bar for the next task; `q` to quit.
+- Left pane — task, orchestrator thinking, agent roster, final answer.
+- Right pane — phase indicator, agent grid with portraits, live shared-memory drawer, artifact list.
+- Bottom — input bar; `q` to quit.
 
-**What you see in motion**
-
-- Avatars appear with each `AgentSpawned`; border glow turns on at `AgentRunning`.
-- Speech bubbles flash above an avatar on every `tool_call` (🔍 web_search, 🧮 calculate, 🐍 run_python, 💾 write_to_shared_memory, 📖 read_shared_memory, 📅 get_current_date, 🔄 request_handoff).
-- The memory drawer upserts and flashes on every `memory_write`.
-- Handoffs from Phase 3 annotate both cards with arrow labels (`↦ Hermes`, `← Cyclops`).
-- The chat pane types out the synthesized answer on `final_result`.
-
-**Source map** (under `app/tui/`)
+**Source map** (`app/tui/`)
 
 | File | Role |
-|---|---|
-| `main.py` | `SwarmApp(App)` + the `agent-swarm` CLI entry |
-| `event_router.py` | `SwarmEvent` → widget dispatch |
-| `avatars.py` | `Character` + `AvatarPool` + ~28 portraits |
+| --- | --- |
+| `main.py` | `SwarmApp(App)` and the `agent-swarm` CLI entry |
+| `event_router.py` | `SwarmEvent` to widget dispatch |
+| `avatars.py` | `Character`, `AvatarPool`, portraits |
 | `demo.py` | Scripted event stream for `--demo` |
 | `styles.tcss` | Layout, colors, glow class |
 | `widgets/` | `AgentGrid`, `AgentCard`, `MemoryDrawer`, `ChatPane`, `SwarmComputer`, `InputBar` |
-
----

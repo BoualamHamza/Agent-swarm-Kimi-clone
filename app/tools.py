@@ -7,8 +7,7 @@ Fifteen tools are available to every worker agent:
     - get_current_date
 
   Swarm-memory tools (always available):
-    - write_to_shared_memory / read_shared_memory
-    - request_handoff
+    - write_to_shared_memory / read_shared_memory / wait_for_memory
 
   Web (always available):
     - web_search                (Tavily — finds URLs + snippets)
@@ -123,22 +122,6 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                     "timeout_sec": {"type": "integer", "description": "Max seconds to wait (1-120, default 30)", "default": 30},
                 },
                 "required": ["key"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "request_handoff",
-            "description": "Signal that a different specialist agent should handle a sub-problem you discovered. Only use if the work genuinely needs a different specialization than yours.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "to_role": {"type": "string", "description": "Type of specialist needed"},
-                    "reason":  {"type": "string", "description": "Why this needs a different specialist"},
-                    "context": {"type": "string", "description": "Everything the new agent needs to know"},
-                },
-                "required": ["to_role", "reason", "context"],
             },
         },
     },
@@ -361,8 +344,6 @@ class ToolExecutor:
                     args.get("key", ""),
                     int(args.get("timeout_sec", 30)),
                 )
-            if name == "request_handoff":
-                return f'Handoff to "{args.get("to_role", "?")}" registered.'
             if name == "web_search":
                 return await self._web_search(args.get("query", ""), int(args.get("max_results", 5)))
             if name == "scrape_url":
