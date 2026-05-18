@@ -16,25 +16,25 @@ Agents run concurrently and read each other's findings through a shared key-valu
 
 ## Core Concepts
 
-- **Orchestrator** — a single planning LLM call with no tools. Reads the task and emits a JSON manifest of workers (name, role, task).
-- **Worker** — an LLM call with tools. Reads shared memory before acting, writes findings as it works, sees what other workers have written.
-- **Shared Memory** — key-value store visible to every agent; the mechanism that turns parallel workers into a swarm.
-- **Sandbox** — an E2B-backed execution environment shared across the swarm for Python, shell, and file operations.
-- **Aggregator** — final LLM call (no tools) that synthesizes worker outputs and memory into one answer.
+- **Orchestrator** — an iterative tool-using LLM. Its tools are `spawn_workers(specs)`, `read_shared_memory(key)`, and `list_artifacts()`. It plans, dispatches one or more cohorts, inspects what came back, and writes the final answer itself.
+- **Cohort** — the set of workers spawned in one `spawn_workers` call. Workers in a cohort run in parallel and cannot see each other's writes. Workers in a later cohort can read everything earlier cohorts wrote — the orchestrator uses sequential cohorts when a builder depends on a researcher's output.
+- **Worker** — an LLM call with tools. Reads shared memory before acting and writes findings as it works.
+- **Shared Memory** — key-value store visible to every agent; the mechanism that turns parallel workers into a swarm. Each worker's full output is preserved at `worker:<id>:output`.
+- **Sandbox** — an E2B-backed execution environment shared across the swarm for Python, shell, and file operations. Artifacts written to the sandbox are surfaced to the user.
+- **Skills** — SKILL.md packages that workers can invoke for domain tasks (data-analyst, financial-analyst, file-manager, pptx, xlsx, web-scraper, python-runner, data-vulgariser).
 
-Workers have access to: `calculate`, `get_current_date`, `read_shared_memory`, `write_to_shared_memory`, `wait_for_memory`, `web_search`, `scrape_url`, `run_python`, `read_file`, `write_file`, `edit_file`, `list_files`, `glob_files`, `grep_files`, `run_shell`.
+Worker tools: `calculate`, `get_current_date`, `read_shared_memory`, `write_to_shared_memory`, `wait_for_memory`, `web_search`, `scrape_url`, `run_python`, `read_file`, `write_file`, `edit_file`, `list_files`, `glob_files`, `grep_files`, `run_shell`.
 
-Example orchestrator output:
+Example orchestrator call:
 
 ```json
-{
-  "reasoning": "Three independent dimensions to analyze in parallel.",
-  "agents": [
-    { "id": "a1", "name": "MarketAnalyst",  "role": "market sizing",        "task": "TAM/SAM/SOM and competitors for B2B SaaS" },
-    { "id": "a2", "name": "TechArchitect",  "role": "technical feasibility", "task": "Build vs buy, stack, infra cost" },
-    { "id": "a3", "name": "RiskAssessor",   "role": "risk identification",   "task": "Top 5 risks and mitigations" }
+spawn_workers({
+  "specs": [
+    { "name": "MarketAnalyst",  "role": "market sizing",        "task": "TAM/SAM/SOM and competitors for B2B SaaS" },
+    { "name": "TechArchitect",  "role": "technical feasibility", "task": "Build vs buy, stack, infra cost" },
+    { "name": "RiskAssessor",   "role": "risk identification",   "task": "Top 5 risks and mitigations" }
   ]
-}
+})
 ```
 
 ## TUI — `agent-swarm`
