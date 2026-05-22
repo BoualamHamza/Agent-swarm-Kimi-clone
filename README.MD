@@ -14,6 +14,14 @@ Agents run concurrently and read each other's findings through a shared key-valu
 | Parallel Sub-agents | N agents, no coordination |
 | Agent Swarm | Parallel + shared memory |
 
+## Architecture
+
+![Agent Swarm architecture](architecture.png)
+
+## Setup
+
+See [SETUP.md](SETUP.md) for full installation and configuration steps.
+
 ## Core Concepts
 
 - **Orchestrator** — an iterative tool-using LLM. Its tools are `spawn_workers(specs)`, `read_shared_memory(key)`, and `list_artifacts()`. It plans, dispatches one or more cohorts, inspects what came back, and writes the final answer itself.
