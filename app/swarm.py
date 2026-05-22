@@ -23,7 +23,7 @@ from langsmith import traceable
 
 from app.memory import SharedMemoryStore, get_store
 from app.orchestrator import run_orchestrator
-from app.sandbox import SwarmSandbox
+from app.sandbox import DEFAULT_SANDBOX_TIMEOUT, SwarmSandbox
 from app.skills_loader import upload_skills
 from app.state import (
     ArtifactEmitted,
@@ -37,6 +37,13 @@ logger = logging.getLogger(__name__)
 
 _ARTIFACTS_SANDBOX_DIR = "/home/user/workspace/artifacts"
 _ARTIFACTS_LOCAL_ROOT = Path.home() / ".agent-swarm" / "artifacts"
+
+
+def _sandbox_timeout() -> int:
+    """Sandbox lifetime in seconds: E2B_SANDBOX_TIMEOUT if set, else the
+    SwarmSandbox default. Single source of truth so the default isn't shadowed
+    by a separate literal here."""
+    return int(os.getenv("E2B_SANDBOX_TIMEOUT", str(DEFAULT_SANDBOX_TIMEOUT)))
 
 
 @traceable(name="run_swarm", run_type="chain")
@@ -65,7 +72,7 @@ async def run_swarm(  # type: ignore[misc]
             try:
                 sandbox = await SwarmSandbox.create(
                     template_id=os.getenv("E2B_TEMPLATE_ID"),
-                    timeout=int(os.getenv("E2B_SANDBOX_TIMEOUT", "600")),
+                    timeout=_sandbox_timeout(),
                 )
                 await upload_skills(sandbox)
             except Exception as e:

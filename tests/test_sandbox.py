@@ -100,6 +100,24 @@ def _make_sandbox(stub: StubAsyncSandbox):
     return SwarmSandbox(stub)  # type: ignore[arg-type]
 
 
+def test_sandbox_timeout_defaults_to_module_default(monkeypatch):
+    # With no env override, the swarm must use the SwarmSandbox default lifetime
+    # — not a separate hardcoded value. (Regression: swarm.py hardcoded 600,
+    # silently ignoring the 3600 default in sandbox.py.)
+    from app.sandbox import DEFAULT_SANDBOX_TIMEOUT
+    from app.swarm import _sandbox_timeout
+
+    monkeypatch.delenv("E2B_SANDBOX_TIMEOUT", raising=False)
+    assert _sandbox_timeout() == DEFAULT_SANDBOX_TIMEOUT
+
+
+def test_sandbox_timeout_env_overrides(monkeypatch):
+    from app.swarm import _sandbox_timeout
+
+    monkeypatch.setenv("E2B_SANDBOX_TIMEOUT", "1234")
+    assert _sandbox_timeout() == 1234
+
+
 @pytest.mark.asyncio
 async def test_resolve_relative_paths_against_root():
     stub = StubAsyncSandbox()

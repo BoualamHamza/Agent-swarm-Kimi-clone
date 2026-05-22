@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from datetime import datetime
 
 from langsmith import traceable
@@ -22,6 +23,11 @@ from app.state import AgentSpec, WorkerResult
 from app.tools import TOOL_SCHEMAS
 
 logger = logging.getLogger(__name__)
+
+# Per-call completion budget for workers. Reasoning models spend hidden
+# reasoning tokens against this too, so the default is generous and
+# env-configurable. NOTE: this is the OUTPUT cap, not the context window.
+_WORKER_MAX_TOKENS = int(os.getenv("WORKER_MAX_TOKENS", "48000"))
 
 
 _WORKSPACE_SECTION = """
@@ -64,7 +70,7 @@ SKILL-FIRST PROTOCOL (mandatory):
 - If multiple skills apply, read each of their SKILL.md files before fanning out into other tools.
 - If NO skill applies, say so briefly in your reasoning and proceed.
 
-Tool budget — keep this loop short (HARD CAP: 15 iterations; you will be killed at the cap):
+Tool budget — keep this loop short (HARD CAP: 25 iterations; you will be killed at the cap):
 - At most 10 web_search calls. After that, work with what you have.
 - Aim to finish within 10-12 tool calls total (skill reads do not count against this budget — they save calls).
 
@@ -81,6 +87,7 @@ Tool usage:
 - Use get_current_date if temporal context matters.
 - Use web_search for current information only — do NOT search for things you can reason about.
 - Use scrape_url to read the full content of a specific URL found via web_search when a snippet is not enough.
+- Use map_website to discover which pages exist on a known site (optionally filtered by a 'search' topic), then scrape_url the most relevant ones — cheaper than guessing URLs.
 {workspace}
 End with a clear, short summary of what you did and the keys/paths where the orchestrator can find your detailed output. Do not end with another tool call when your work is done."""
 
@@ -107,9 +114,11 @@ async def run_worker(
         shared_memory=shared_memory,
         lock=lock,
         on_event=on_event,
+        max_tokens=_WORKER_MAX_TOKENS,
         store=store,
         session_id=session_id,
         sandbox=sandbox,
+        persist_tool="write_to_shared_memory",
     )
 
     # Persist the worker's full final output to shared memory so the

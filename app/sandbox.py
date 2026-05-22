@@ -21,7 +21,9 @@ from e2b import AsyncSandbox, FileType
 
 
 _DEFAULT_ROOT = "/home/user"
-_DEFAULT_TIMEOUT = 600  # seconds the sandbox stays alive
+# Sandbox lifetime in seconds. Public so the swarm bootstrap can use it as the
+# single source of truth (overridable via the E2B_SANDBOX_TIMEOUT env var).
+DEFAULT_SANDBOX_TIMEOUT = 3600
 
 
 class SwarmSandbox:
@@ -41,7 +43,7 @@ class SwarmSandbox:
         cls,
         *,
         template_id: Optional[str] = None,
-        timeout: int = _DEFAULT_TIMEOUT,
+        timeout: int = DEFAULT_SANDBOX_TIMEOUT,
         root: str = _DEFAULT_ROOT,
     ) -> "SwarmSandbox":
         """Spin up a fresh sandbox. If ``template_id`` is None, e2b uses its
@@ -109,7 +111,7 @@ class SwarmSandbox:
         if not isinstance(content, str):
             content = str(content)
         lines = content.splitlines(keepends=True)
-        return "".join(lines[offset : offset + limit])
+        return "".join(lines[offset: offset + limit])
 
     async def read_bytes(self, path: str) -> bytes:
         """Read a file as raw bytes — used for artifact download."""
@@ -192,7 +194,8 @@ class SwarmSandbox:
                     line_no = int(parts[1])
                 except ValueError:
                     continue
-                matches.append({"path": parts[0], "line": line_no, "text": parts[2]})
+                matches.append(
+                    {"path": parts[0], "line": line_no, "text": parts[2]})
         return matches
 
     async def execute(self, command: str, *, timeout: int = 60) -> dict:

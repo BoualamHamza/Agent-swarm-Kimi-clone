@@ -129,25 +129,158 @@ print(report)
 
 If `errors_found`, fix the offending cells and re-run recalc. **Do not deliver a workbook with errors.**
 
+## Mandatory Chart Lint Step (if the workbook has charts)
+
+Recalc only checks formulas — it is blind to charts. openpyxl writes only a chart's
+formula references (never the plotted values), so a chart pointing at the wrong range or
+the wrong orientation raises no error and silently renders blank. After recalc, lint every
+chart with the bundled script:
+
+```python
+import subprocess, json
+res = subprocess.run(
+    ["python", "/home/user/skills/xlsx/scripts/chart_lint.py",
+     "/home/user/workspace/artifacts/model.xlsx"],
+    capture_output=True, text=True, timeout=60,
+)
+chart_report = json.loads(res.stdout)
+print(chart_report)
+```
+
+`chart_report` is JSON with `status` (`"success"` | `"issues_found"`), `total_charts`,
+`total_issues`, and `issues` — each issue naming the chart, its title, and a `type`:
+- `empty_chart` — chart has no data series
+- `untitled_series` — a series with no title (legend will show `Series1…N`)
+- `single_point_series` — a line series referencing a single cell (renders blank; usually a missing `from_rows=True`)
+- `overlapping_charts` — two charts collide on the same sheet
+
+If `issues_found`, fix the chart code (see the rules below) and re-run. **Do not deliver a
+workbook whose charts don't lint clean.**
+
 ## Building a Dashboard Sheet
 When the model has 3+ data sheets, always add a `Dashboard` sheet at index 0 with:
-- **KPI tiles** — large numbers (e.g., revenue, EBITDA margin, intrinsic value) pulled by formula from the model sheets, formatted boldly
-- **A chart** — line chart for time series, bar chart for category comparisons. Use `openpyxl.chart`:
-  ```python
-  from openpyxl.chart import LineChart, Reference
-  chart = LineChart()
-  chart.title = "Revenue Forecast ($mm)"
-  chart.style = 12
-  chart.y_axis.title = "USD millions"
-  chart.x_axis.title = "Year"
-  data = Reference(ws, min_col=2, min_row=1, max_col=6, max_row=2)
-  cats = Reference(ws, min_col=2, min_row=1, max_col=6, max_row=1)
-  chart.add_data(data, titles_from_data=True)
-  chart.set_categories(cats)
-  ws.add_chart(chart, "B10")
-  ```
+- **KPI tiles** — large numbers (revenue, EBITDA margin, intrinsic value) pulled by formula from the model sheets, styled with the `kpi_tile` helper below
+- **Charts** — see the chart rules below (this is where dashboards most often break)
 - **A scenario / sensitivity table** when the model has user-tweakable assumptions
-- Freeze panes (`ws.freeze_panes = "B2"`) and hide gridlines (`ws.sheet_view.showGridLines = False`) for a polished look
+- Freeze panes (`ws.freeze_panes = "A2"`) and hide gridlines (`ws.sheet_view.showGridLines = False`)
+
+### Dashboard styling — fixed palette, KPI tiles, section bands
+A dashboard looks clean when it uses **one accent color**, boxed KPI tiles, and labelled
+section bands — not ad-hoc bold text. Use this palette (the navy `1E2761` matches the
+canonical header style above) and these two helpers verbatim; don't invent new colors.
+
+```python
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+
+NAVY, TINT, GRID, WHITE = "1E2761", "EEF0F7", "D9D9D9", "FFFFFF"   # accent / tile fill / hairline / text
+USED_COLS = 12                                                     # how wide your dashboard content is
+_thin = Side(style="thin", color=GRID)
+BOX = Border(left=_thin, right=_thin, top=_thin, bottom=_thin)
+
+def band(ws, row, text, size=11):                 # navy section header spanning the dashboard width
+    ws.cell(row, 1, text).font = Font(name="Calibri", size=size, bold=True, color=WHITE)
+    ws.cell(row, 1).alignment = Alignment(vertical="center")
+    for col in range(1, USED_COLS + 1):
+        ws.cell(row, col).fill = PatternFill("solid", fgColor=NAVY)
+    ws.row_dimensions[row].height = 30 if size > 12 else 26
+
+def kpi_tile(ws, col, top, label, value_ref, num_fmt="$#,##0"):    # boxed label-over-value card
+    lab, val = ws[f"{col}{top}"], ws[f"{col}{top + 1}"]
+    lab.value, val.value = label, value_ref       # value_ref is a formula, e.g. "='Income Statement'!F9"
+    lab.font = Font(name="Calibri", size=9, bold=True, color=NAVY)
+    val.font = Font(name="Calibri", size=18, bold=True, color="000000")
+    for c in (lab, val):
+        c.fill = PatternFill("solid", fgColor=TINT)
+        c.alignment = Alignment(horizontal="left", vertical="center")
+        c.border = BOX
+    val.number_format = num_fmt
+    ws.column_dimensions[col].width = 18
+    ws.row_dimensions[top + 1].height = 28
+```
+
+Lay the dashboard out top-to-bottom:
+
+```python
+# 1) Title band (row 1)
+dash["A1"] = "NVIDIA (NVDA) - Dashboard"
+dash["A1"].font = Font(name="Calibri", size=16, bold=True, color=WHITE)
+for col in range(1, USED_COLS + 1):
+    dash.cell(1, col).fill = PatternFill("solid", fgColor=NAVY)
+dash.row_dimensions[1].height = 30
+
+# 2) KPI strip — tiles in B/D/F/H leave a 1-column gap between cards
+band(dash, 3, "Key Metrics")
+kpi_tile(dash, "B", 4, "Revenue ($mm)",   "='Income Statement'!F9",  "$#,##0")
+kpi_tile(dash, "D", 4, "Diluted EPS ($)", "='Income Statement'!F21", "$#,##0.00")
+kpi_tile(dash, "F", 4, "Intrinsic ($)",   "=_chartdata!B2",          "$#,##0.00")
+
+# 3) Charts section
+band(dash, 8, "Trends & Comparison")
+# ... add charts below (see chart rules) ...
+```
+
+Keep chart styling consistent too: give every chart the **same** `chart.style` (e.g. `10`)
+so colors and gridlines match across the dashboard.
+
+### Charts — read this before adding ANY chart
+openpyxl chart bugs are silent: openpyxl writes only the *formula references*, not the
+plotted values, so a broken chart looks fine in code and only renders as blank/garbled
+after recalc. The four failure modes below account for ~every bad dashboard. Follow the
+rules exactly.
+
+**1. Orientation — the #1 cause of blank line charts.**
+`add_data()` reads **column-by-column by default**. Financial models put periods *across
+columns* (years in `B1:F1`, a metric in `B9:F9`). Adding that horizontal range with the
+default orientation produces **N single-point series** — a line needs ≥2 points, so it
+draws *nothing* and the legend shows `Series1…SeriesN`. For a metric laid out across a
+row you MUST pass `from_rows=True` **and** include the label cell so the series is named:
+
+```python
+from openpyxl.chart import LineChart, BarChart, Reference
+from openpyxl.utils import get_column_letter
+
+# 'Income Statement': A9="Revenue", B9:F9 = values, B1:F1 = years
+c1 = LineChart()
+c1.title = "Revenue Trend ($mm)"; c1.style = 10; c1.y_axis.title = "USD mm"
+c1.width, c1.height = 13, 7                                          # cm — set so layout is predictable
+data = Reference(inc, min_col=1, max_col=6, min_row=9, max_row=9)    # A9:F9, incl the label in A9
+c1.add_data(data, titles_from_data=True, from_rows=True)            # -> 1 series, 5 points, named "Revenue"
+c1.set_categories(Reference(inc, min_col=2, max_col=6, min_row=1, max_row=1))  # B1:F1 years
+```
+
+For a **category comparison** the data is usually already in a *column*, so the default
+orientation is correct — just include the header cell as the title:
+
+```python
+# hidden helper: B1="$/share" (header), B2=intrinsic, B3=market ; A2/A3 = labels
+c3 = BarChart(); c3.title = "Intrinsic vs Market ($/share)"; c3.width, c3.height = 13, 7
+c3.add_data(Reference(hlp, min_col=2, max_col=2, min_row=1, max_row=3), titles_from_data=True)
+c3.set_categories(Reference(hlp, min_col=1, max_col=1, min_row=2, max_row=3))
+```
+
+**2. Every series MUST be named.** A series with no title renders as `Series1…SeriesN`
+(or `Série1…` in non-English Excel). Always either include the label cell in the data
+range with `titles_from_data=True`, or set `series.tx` explicitly via `SeriesLabel`.
+
+**3. Keep scratch data OFF the dashboard.** Helper cells the charts read from leak into
+the visible sheet as clutter like `Intrinsic_tmp` / `Market_tmp`. Put them on a dedicated
+sheet and hide it: `hlp = wb.create_sheet("_chartdata"); hlp.sheet_state = "hidden"`.
+
+**4. Lay charts on a grid so they don't overlap.** A 13×7 cm chart occupies ~**8 columns
+× 14 rows**. Hand-picked anchors like `A7`/`B10` collide. Use a grid whose pitch exceeds
+the footprint:
+
+```python
+COL_PITCH, ROW_PITCH, FIRST_ROW = 10, 16, 9   # start below the KPI tiles
+def anchor(i):                                 # 2-column grid
+    return f"{get_column_letter(2 + (i % 2) * COL_PITCH)}{FIRST_ROW + (i // 2) * ROW_PITCH}"
+for i, ch in enumerate([c1, c2, c3]):
+    dash.add_chart(ch, anchor(i))
+```
+
+**5. Widen columns.** Default width clips text and numbers (`Revenu…`, `######`). Set
+widths on every dashboard column that holds a label or KPI:
+`dash.column_dimensions['A'].width = 22`.
 
 ## Common Workflow
 1. Pick libraries (pandas for bulk data, openpyxl for formulas/formatting)
@@ -156,10 +289,13 @@ When the model has 3+ data sheets, always add a `Dashboard` sheet at index 0 wit
 4. Build **Model** / detail sheets with **formula references** to Inputs
 5. Add a **Dashboard** sheet (sheet index 0) for any multi-sheet output
 6. Save → recalc → fix errors → re-recalc until `status == "success"`
-7. Write the artifact path to shared memory: `write_to_shared_memory(key="artifact:xlsx", value="<absolute path>")`
-8. In your final message, summarise WHAT is in the workbook and the path — don't dump the data
+7. If the workbook has charts → run `chart_lint.py` → fix chart code → re-lint until `status == "success"`
+8. Write the artifact path to shared memory: `write_to_shared_memory(key="artifact:xlsx", value="<absolute path>")`
+9. In your final message, summarise WHAT is in the workbook and the path — don't dump the data
 
 ## Quick Pitfalls Checklist
+- [ ] Charts: horizontal (period-across-columns) data uses `from_rows=True`; every series has a title; charts placed on a non-overlapping grid; dashboard columns widened; helper data on a hidden sheet
+- [ ] Dashboard styling: one accent color (navy `1E2761`), `kpi_tile`/`band` helpers for KPIs and section headers, a single shared `chart.style`
 - [ ] Column letters match column numbers (col 27 = AA, not Z)
 - [ ] Rows are 1-indexed (DataFrame row 0 = Excel row 2 if you wrote a header)
 - [ ] Cross-sheet refs use `'Sheet Name'!A1` (quotes for spaces)

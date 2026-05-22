@@ -180,6 +180,73 @@ async def test_loop_closes_executor(monkeypatch):
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_loop_nudges_worker_to_persist_then_succeeds():
+    # The w2/w4 live-trace bug: model announces "let me write to memory" but
+    # ends its turn without calling the tool. With persist_tool set, the loop
+    # must nudge it and let it actually persist.
+    route = respx.post(OPENROUTER)
+    route.side_effect = [
+        httpx.Response(200, json=_completion(
+            content="Now let me write the findings to shared memory.", finish="stop")),
+        httpx.Response(200, json=_completion(
+            content=None,
+            tool_calls=[_tc("c1", "write_to_shared_memory", {"key": "k", "value": "v"})],
+            finish="tool_calls")),
+        httpx.Response(200, json=_completion(content="Persisted.", finish="stop")),
+    ]
+
+    mem: dict[str, str] = {}
+    out = await tool_use_loop(
+        agent_id="w1", model="x/y", system="sys", user="hi",
+        tools=TOOL_SCHEMAS, shared_memory=mem, lock=asyncio.Lock(),
+        persist_tool="write_to_shared_memory",
+    )
+    assert out.status == "ok"
+    assert out.text == "Persisted."
+    assert mem == {"k": "v"}
+    assert route.call_count == 3
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_loop_persist_nudge_gives_up_after_max():
+    # Model stubbornly never persists — loop nudges max_persist_nudges times
+    # then accepts the exit rather than looping forever.
+    route = respx.post(OPENROUTER)
+    route.mock(return_value=httpx.Response(
+        200, json=_completion(content="I refuse to persist.", finish="stop")))
+
+    mem: dict[str, str] = {}
+    out = await tool_use_loop(
+        agent_id="w1", model="x/y", system="sys", user="hi",
+        tools=TOOL_SCHEMAS, shared_memory=mem, lock=asyncio.Lock(),
+        persist_tool="write_to_shared_memory", max_persist_nudges=2,
+    )
+    assert out.status == "ok"
+    assert out.text == "I refuse to persist."
+    assert mem == {}
+    assert route.call_count == 3  # 1 initial + 2 nudges
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_loop_no_persist_guard_when_tool_unset():
+    # Without persist_tool, behavior is unchanged: announce-and-stop returns ok
+    # on the first response.
+    route = respx.post(OPENROUTER)
+    route.mock(return_value=httpx.Response(
+        200, json=_completion(content="Done without persisting.", finish="stop")))
+
+    out = await tool_use_loop(
+        agent_id="w1", model="x/y", system="sys", user="hi",
+        tools=TOOL_SCHEMAS, shared_memory={}, lock=asyncio.Lock(),
+    )
+    assert out.status == "ok"
+    assert route.call_count == 1
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_loop_detects_empty_content_with_stop():
     # Model says "stop" but produced no content — surface as `empty`, not silently `ok`.
     respx.post(OPENROUTER).mock(return_value=httpx.Response(
