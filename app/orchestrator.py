@@ -36,9 +36,12 @@ from app.state import (
     AgentRunning,
     AgentSpawned,
     AgentSpec,
+    OrchestratorReasoning,
     SpawnResult,
     SpawnSummary,
     SwarmEvent,
+    ToolCallEvent,
+    ToolResultEvent,
     WorkerResult,
     WorkerSpec,
 )
@@ -51,10 +54,10 @@ EventEmitter = Callable[[SwarmEvent], Awaitable[None]]
 _ARTIFACTS_DIR = "/home/user/workspace/artifacts"
 
 # Defaults — overridable via env vars / kwargs. See plan §"Iteration Bounds".
-DEFAULT_MAX_ITERATIONS    = int(os.getenv("SWARM_MAX_ITERATIONS",    "6"))
+DEFAULT_MAX_ITERATIONS = int(os.getenv("SWARM_MAX_ITERATIONS",    "6"))
 DEFAULT_MAX_TOTAL_WORKERS = int(os.getenv("SWARM_MAX_TOTAL_WORKERS", "30"))
-DEFAULT_MAX_PER_CALL      = int(os.getenv("SWARM_MAX_PER_CALL",      "8"))
-DEFAULT_CONCURRENCY       = int(os.getenv("SWARM_CONCURRENCY",       "4"))
+DEFAULT_MAX_PER_CALL = int(os.getenv("SWARM_MAX_PER_CALL",      "8"))
+DEFAULT_CONCURRENCY = int(os.getenv("SWARM_CONCURRENCY",       "10"))
 
 
 ORCHESTRATOR_SYSTEM = """You are the orchestrator of an agent swarm. You are the ONLY voice to the user — your last assistant message (with no tool calls) IS the user's final answer.
@@ -188,7 +191,8 @@ def _orchestrator_tool_schemas(max_per_call: int) -> list[dict[str, Any]]:
 async def _run_cohort(
     *,
     specs: list[WorkerSpec],
-    id_counter: list[int],   # mutable single-element ref for unique ids across iterations
+    # mutable single-element ref for unique ids across iterations
+    id_counter: list[int],
     task: str,
     shared_memory: dict[str, str],
     lock: asyncio.Lock,
@@ -311,6 +315,11 @@ async def run_orchestrator(
                 final_text = content
             break
 
+        # Surface the orchestrator's reasoning that accompanies its tool calls,
+        # so its decision-making is visible in the trace (not just the spawns).
+        if content and on_event:
+            await on_event(OrchestratorReasoning(reasoning=content))
+
         # Otherwise, append the assistant message + execute each tool call
         messages.append({
             "role": "assistant",
@@ -328,9 +337,16 @@ async def run_orchestrator(
         for tc in msg.tool_calls:
             name = tc.function.name
             try:
-                args: dict[str, Any] = json.loads(tc.function.arguments or "{}")
+                args: dict[str, Any] = json.loads(
+                    tc.function.arguments or "{}")
             except json.JSONDecodeError:
                 args = {}
+
+            # spawn_workers has its own AgentSpawned/Running/Complete events; the
+            # read-only tools were previously silent — emit them so iterations
+            # that only poll shared memory / artifacts are visible in the trace.
+            if name != "spawn_workers" and on_event:
+                await on_event(ToolCallEvent(agent_id="orchestrator", name=name, input=args))
 
             if name == "spawn_workers":
                 spawn_result, cohort_results = await _handle_spawn_workers(
@@ -356,6 +372,10 @@ async def run_orchestrator(
                 tool_payload = await _list_artifacts(sandbox)
             else:
                 tool_payload = f"Unknown tool: {name}"
+
+            if name != "spawn_workers" and on_event:
+                await on_event(ToolResultEvent(
+                    agent_id="orchestrator", name=name, result=tool_payload))
 
             messages.append({
                 "role": "tool",

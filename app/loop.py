@@ -50,8 +50,16 @@ async def tool_use_loop(
     store: SharedMemoryStore | None = None,
     session_id: str | None = None,
     sandbox: SwarmSandbox | None = None,
+    persist_tool: str | None = None,
+    max_persist_nudges: int = 2,
 ) -> LoopOutcome:
-    """Run a single agent's tool-use loop and return a structured outcome."""
+    """Run a single agent's tool-use loop and return a structured outcome.
+
+    If ``persist_tool`` is set, the loop refuses to accept a clean exit until the
+    agent has called that tool at least once. When the model tries to end without
+    it, the loop injects a reminder and continues, up to ``max_persist_nudges``
+    times. This stops agents that gather data in-context but never save it.
+    """
     client = get_openrouter()
     executor = ToolExecutor(
         shared_memory, lock,
@@ -62,6 +70,7 @@ async def tool_use_loop(
         {"role": "user",   "content": user},
     ]
     records: list[ToolCallRecord] = []
+    persist_nudges = 0
 
     try:
         for iteration in range(max_iterations):
@@ -77,6 +86,32 @@ async def tool_use_loop(
 
             # Done — no more tool calls
             if finish != "tool_calls" or not msg.tool_calls:
+                # Persistence guard: don't accept an exit from an agent that
+                # gathered data but never saved it. Nudge it to persist first.
+                if (persist_tool
+                        and persist_nudges < max_persist_nudges
+                        and not any(r.name == persist_tool for r in records)):
+                    persist_nudges += 1
+                    logger.warning(
+                        "loop[%s] exiting without %s — nudging (%d/%d)",
+                        agent_id, persist_tool, persist_nudges, max_persist_nudges,
+                    )
+                    messages.append({
+                        "role": "assistant",
+                        "content": msg.content or "(no content)",
+                    })
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            f"You are ending your turn but have not called "
+                            f"`{persist_tool}`. Any findings you gathered will be "
+                            f"LOST unless you persist them now. Call `{persist_tool}` "
+                            f"with your structured findings (include source URLs), "
+                            f"then finish."
+                        ),
+                    })
+                    continue
+
                 if content:
                     return LoopOutcome(text=content, status="ok", tool_calls=records)
 

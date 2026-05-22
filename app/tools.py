@@ -1,6 +1,6 @@
 """Tool schemas (OpenAI function-calling format) and the executor.
 
-Fifteen tools are available to every worker agent:
+Sixteen tools are available to every worker agent:
 
   Pure-Python tools (always available):
     - calculate                 (sandboxed math via asteval)
@@ -13,6 +13,8 @@ Fifteen tools are available to every worker agent:
     - web_search                (Tavily — finds URLs + snippets)
     - scrape_url                (Firecrawl — full page content as markdown;
                                  requires FIRECRAWL_API_KEY)
+    - map_website               (Firecrawl — discover a site's URLs via its
+                                 sitemap; requires FIRECRAWL_API_KEY)
 
   Sandbox tools (require an injected SwarmSandbox; otherwise return
   "sandbox unavailable"):
@@ -45,6 +47,12 @@ _ARTIFACTS_DIR = "/home/user/workspace/artifacts"
 _SANDBOX_UNAVAILABLE = (
     "Error: sandbox unavailable (no E2B_API_KEY set or sandbox creation failed)."
 )
+
+# Max chars returned by scrape_url / map_website before truncation. Raise for
+# large-context models that can absorb full pages; env-configurable.
+SCRAPE_MAX_CHARS = int(os.getenv("SCRAPE_MAX_CHARS", "40000"))
+# Max lines read_file may return in a single call.
+READ_FILE_MAX_LINES = int(os.getenv("READ_FILE_MAX_LINES", "15000"))
 
 
 # ─── Schemas (OpenAI function-calling format) ────────────────────────────────
@@ -155,6 +163,37 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                     "url": {
                         "type": "string",
                         "description": "The full URL to scrape, e.g. 'https://example.com/article'",
+                    },
+                },
+                "required": ["url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "map_website",
+            "description": (
+                "Discover the URLs of a website (sitemap-driven) without scraping their content. "
+                "Use this to find which pages exist on a site before deciding what to scrape_url. "
+                "Pass an optional 'search' to return only the most relevant URLs for a topic. "
+                "Returns a ranked list of URL + title + description; then scrape_url the ones you want."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "The root site URL to map, e.g. 'https://example.com'",
+                    },
+                    "search": {
+                        "type": "string",
+                        "description": "Optional topic filter; returns the most relevant URLs first, e.g. 'pricing'",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max URLs to return (1-100, default 50)",
+                        "default": 50,
                     },
                 },
                 "required": ["url"],
@@ -348,6 +387,12 @@ class ToolExecutor:
                 return await self._web_search(args.get("query", ""), int(args.get("max_results", 5)))
             if name == "scrape_url":
                 return await self._scrape_url(args.get("url", ""))
+            if name == "map_website":
+                return await self._map_website(
+                    args.get("url", ""),
+                    args.get("search", ""),
+                    int(args.get("limit", 50)),
+                )
             if name == "run_python":
                 return await self._run_python(args.get("code", ""), int(args.get("timeout", 30)))
             if name == "read_file":
@@ -475,12 +520,49 @@ class ToolExecutor:
             markdown = getattr(result, "markdown", None) or ""
             if not markdown:
                 return f"No content returned for {url}"
-            # Cap at ~8000 chars to keep context manageable
-            if len(markdown) > 8000:
-                markdown = markdown[:8000] + "\n\n[…content truncated]"
+            # Cap to keep context manageable (env-configurable via SCRAPE_MAX_CHARS)
+            if len(markdown) > SCRAPE_MAX_CHARS:
+                markdown = markdown[:SCRAPE_MAX_CHARS] + "\n\n[…content truncated]"
             return markdown
         except Exception as e:
             return f"Error scraping {url}: {type(e).__name__}: {e}"
+
+    async def _map_website(self, url: str, search: str, limit: int) -> str:
+        if not url.strip():
+            return "Error: url is required"
+        try:
+            client = get_firecrawl()
+        except RuntimeError as e:
+            return f"Error: {e}"
+        limit = max(1, min(100, limit))
+        search_filter = search.strip() or None
+        try:
+            result = await asyncio.to_thread(
+                client.map, url, search=search_filter, limit=limit
+            )
+            links = getattr(result, "links", None) or []
+            if not links:
+                return f"No URLs found for {url}"
+            header = (
+                f'URLs on {url} (filtered by "{search_filter}"):'
+                if search_filter
+                else f"URLs on {url}:"
+            )
+            lines = [header]
+            for i, link in enumerate(links, 1):
+                link_url = getattr(link, "url", "") or ""
+                title = getattr(link, "title", None) or "(no title)"
+                desc = (getattr(link, "description", None) or "").replace("\n", " ")
+                entry = f"{i}. {title}\n   {link_url}"
+                if desc:
+                    entry += f"\n   {desc[:200]}"
+                lines.append(entry)
+            out = "\n".join(lines)
+            if len(out) > SCRAPE_MAX_CHARS:
+                out = out[:SCRAPE_MAX_CHARS] + "\n\n[…list truncated]"
+            return out
+        except Exception as e:
+            return f"Error mapping {url}: {type(e).__name__}: {e}"
 
     # ─── Sandbox-backed tools ───────────────────────────────────────────────
 
@@ -499,7 +581,7 @@ class ToolExecutor:
         if self.sandbox is None:
             return _SANDBOX_UNAVAILABLE
         offset = max(0, offset)
-        limit = max(1, min(5000, limit))
+        limit = max(1, min(READ_FILE_MAX_LINES, limit))
         text = await self.sandbox.read(path, offset=offset, limit=limit)
         return text if text else "(file is empty)"
 

@@ -345,6 +345,52 @@ async def test_maxed_out_worker_with_writes_does_not_warn(monkeypatch):
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_orchestrator_emits_events_for_silent_tools(monkeypatch):
+    """read_shared_memory / list_artifacts were silent — they must now emit
+    tool_call + tool_result events tagged 'orchestrator', and reasoning text
+    accompanying tool calls must surface as orchestrator_reasoning."""
+    _patch_worker(monkeypatch)
+    route = respx.post(OPENROUTER)
+    route.side_effect = [
+        httpx.Response(200, json=_msg(
+            content="Spawning a researcher first.",
+            finish="tool_calls",
+            tool_calls=[_tc("c1", "spawn_workers", _spawn_specs(("W", "r", "t")))],
+        )),
+        httpx.Response(200, json=_msg(
+            content="Checking what the worker persisted.",
+            finish="tool_calls",
+            tool_calls=[_tc("c2", "read_shared_memory", {"key": "all"})],
+        )),
+        httpx.Response(200, json=_msg(content="ok", finish="stop")),
+    ]
+
+    events: list[Any] = []
+
+    async def collect(e):
+        events.append(e)
+
+    run = await run_orchestrator(
+        task="t", shared_memory={}, lock=asyncio.Lock(), on_event=collect,
+    )
+    assert run.final_text == "ok"
+
+    orch_calls = [e for e in events if e.type == "tool_call" and e.agent_id == "orchestrator"]
+    assert [e.name for e in orch_calls] == ["read_shared_memory"]
+
+    orch_results = [e for e in events if e.type == "tool_result" and e.agent_id == "orchestrator"]
+    assert [e.name for e in orch_results] == ["read_shared_memory"]
+
+    reasoning = {e.reasoning for e in events if e.type == "orchestrator_reasoning"}
+    assert "Spawning a researcher first." in reasoning
+    assert "Checking what the worker persisted." in reasoning
+
+    # spawn_workers keeps its own events — no duplicate tool_call for it.
+    assert not any(e.type == "tool_call" and e.name == "spawn_workers" for e in events)
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_list_artifacts_without_sandbox_returns_safe_message(monkeypatch):
     _patch_worker(monkeypatch)
     route = respx.post(OPENROUTER)
