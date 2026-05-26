@@ -15,8 +15,6 @@ _PHASE_LABEL = {
     "idle":          "Idle",
     "orchestrating": "Orchestrating",
     "executing":     "Executing",
-    "handoffs":      "Handoffs",
-    "aggregating":   "Aggregating",
     "complete":      "Complete",
 }
 
@@ -31,24 +29,12 @@ class SwarmHeader(Static):
     def __init__(self) -> None:
         super().__init__(id="swarm-header")
 
-    # ─── Backwards-compat shims for the old ComputerHeader API ──────────────
-    @property
-    def _phase(self) -> str: return self.phase
-    @property
-    def _spawned(self) -> int: return self.running + self.queued + self.done
-    @property
-    def _completed(self) -> int: return self.done
-
     # ─── Mutators called by EventRouter ─────────────────────────────────────
     def set_phase(self, phase: str) -> None:
         self.phase = phase
         self._sync_class()
 
     def increment_queued(self) -> None:
-        self.queued += 1
-
-    def increment_spawned(self) -> None:
-        """Compat alias — treat 'spawned' as 'queued'."""
         self.queued += 1
 
     def mark_running(self) -> None:
@@ -66,7 +52,7 @@ class SwarmHeader(Static):
         if self.phase == "complete":
             self.set_class(True, "-complete")
             self.set_class(False, "-running")
-        elif self.phase in ("executing", "handoffs", "aggregating"):
+        elif self.phase == "executing":
             self.set_class(True, "-running")
             self.set_class(False, "-complete")
         else:

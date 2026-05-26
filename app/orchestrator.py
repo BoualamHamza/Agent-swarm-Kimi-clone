@@ -209,12 +209,12 @@ async def _run_cohort(
         id_counter[0] += 1
         agents.append(AgentSpec(
             id=f"w{id_counter[0]}",
-            name=s.name, role=s.role, task=s.task, skills=s.skills,
+            name=s.name, role=s.role, task=s.task,
         ))
 
     for a in agents:
         if on_event:
-            await on_event(AgentSpawned(spec=a, is_handoff=False))
+            await on_event(AgentSpawned(spec=a))
 
     async def _one(a: AgentSpec) -> WorkerResult:
         async with sem:

@@ -65,7 +65,7 @@ async def scripted_events() -> AsyncIterator[SwarmEvent]:
                    task="Generate 5 calculus word problems with step-by-step solutions")
 
     for spec in (w1, w2, w3, w4):
-        yield AgentSpawned(spec=spec, is_handoff=False)
+        yield AgentSpawned(spec=spec)
         await asyncio.sleep(_FAST)
 
     for sid in ("w1", "w2", "w3", "w4"):
@@ -145,7 +145,7 @@ async def scripted_events() -> AsyncIterator[SwarmEvent]:
 
     w5 = AgentSpec(id="w5", name="BenchmarkReviewer", role="quality reviewer",
                    task="Read all designer findings from shared memory and synthesize a final benchmark file")
-    yield AgentSpawned(spec=w5, is_handoff=False)
+    yield AgentSpawned(spec=w5)
     await asyncio.sleep(_FAST)
     yield AgentRunning(agent_id="w5")
     await asyncio.sleep(_FAST)
@@ -182,7 +182,7 @@ async def scripted_events() -> AsyncIterator[SwarmEvent]:
     await asyncio.sleep(_FAST)
 
     # ─── Artifacts (scripted) ───────────────────────────────────────────────
-    demo_dir = Path.home() / ".agent-swarm" / "artifacts" / "demo"
+    demo_dir = Path.cwd() / ".agent-swarm" / "artifacts" / "demo"
     demo_dir.mkdir(parents=True, exist_ok=True)
 
     csv_path = demo_dir / "benchmark.csv"

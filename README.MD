@@ -72,7 +72,7 @@ Each worker is assigned a stable character at spawn (Hemingway, Cyclops, Hypatia
 | `avatars.py` | `Character`, `AvatarPool`, portraits |
 | `demo.py` | Scripted event stream for `--demo` |
 | `styles.tcss` | Layout, colors, glow class |
-| `widgets/` | `AgentGrid`, `AgentCard`, `MemoryDrawer`, `ChatPane`, `SwarmComputer`, `InputBar` |
+| `widgets/` | `AgentStrip`, `AgentDetailView`, `MemoryDrawer`, `ChatPane`, `SwarmComputer`, `InputBar`, artifact views |
 
 
 **Note**

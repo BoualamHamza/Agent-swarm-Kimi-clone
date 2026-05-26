@@ -144,21 +144,7 @@ class SwarmComputer(Container):
     def show_agent_detail(self) -> None:
         self.show_tab(TAB_AGENT)
 
-    # ─── Compatibility shims (kept for the old test surface) ────────────────
-    # The grid was replaced by the strip; expose `grid` as an alias so any
-    # straggler `app.swarm_computer.grid.get_card(...)` calls keep working.
-    @property
-    def grid(self) -> AgentStrip:  # noqa: D401
-        return self.strip
-
     # ─── Internals ──────────────────────────────────────────────────────────
 
     def _on_artifact_count_change(self, count: int) -> None:
         self._tabs.update_artifact_count(count)
-
-    @property
-    def header(self):
-        # Maintained for backwards compatibility with tests that check
-        # ``swarm_computer.header._phase`` etc. The reactive SwarmHeader lives
-        # on the app; we delegate so callers continue to work.
-        return self.app.swarm_header  # type: ignore[attr-defined]

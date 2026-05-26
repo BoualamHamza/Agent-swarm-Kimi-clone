@@ -87,12 +87,6 @@ class AgentRosterRow(Static):
         self.add_class("-error")
         self._refresh()
 
-    def mark_handoff(self) -> None:
-        self._status = "↦"
-        self.remove_class("-running")
-        self.add_class("-handoff")
-        self._refresh()
-
     def set_selected(self, selected: bool) -> None:
         self.set_class(selected, "-selected")
 
@@ -259,9 +253,3 @@ class ChatPane(Container):
 
     def set_answer(self, text: str) -> None:
         self.final.set_content(text)
-
-    # Backwards-compat: old code used `chat_pane.answer.update(...)` — most of
-    # the routing now goes via `set_answer()`, but expose a thin shim too.
-    @property
-    def answer(self):
-        return self.final

@@ -16,9 +16,9 @@ async def test_demo_runs_to_completion():
         await pilot.pause(35.0)
 
     header = app.swarm_header
-    assert header._phase == "complete"
-    assert header._spawned == 5            # 4 research + 1 reconciler across 2 iterations
-    assert header._completed == 5
+    assert header.phase == "complete"
+    assert header.running + header.queued + header.done == 5
+    assert header.done == 5
     assert set(app.swarm_computer.strip._pills.keys()) == {"w1", "w2", "w3", "w4", "w5"}
     assert set(app.swarm_computer.memory._rows.keys()) == {
         "arithmetic_problems", "algebra_problems", "geometry_problems", "calculus_problem",

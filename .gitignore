@@ -8,9 +8,10 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 .coverage
+.agent-swarm/
 dist/
 build/
-.DS:_Store
+.DS_Store
 .claude/*
 .claude/
 agent_swarm.jsx

@@ -25,9 +25,6 @@ class AgentSpec(BaseModel):
     name: str = Field(description="Short PascalCase agent name")
     role: str = Field(description="One-line specialist description")
     task: str = Field(description="Specific subtask to execute")
-    # Forward-compat: per-agent skill curation. v1 ignores this — every worker
-    # sees every installed skill. The orchestrator can populate it later.
-    skills: list[str] | None = None
 
 
 class WorkerSpec(BaseModel):
@@ -39,7 +36,6 @@ class WorkerSpec(BaseModel):
     name: str = Field(description="Short PascalCase agent name")
     role: str = Field(description="One-line specialist description")
     task: str = Field(description="Specific subtask to execute")
-    skills: list[str] | None = None
 
 
 # ─── Worker primitives ───────────────────────────────────────────────────────
@@ -120,8 +116,6 @@ class OrchestratorReasoning(_EventBase):
 class AgentSpawned(_EventBase):
     type: Literal["agent_spawned"] = "agent_spawned"
     spec: AgentSpec
-    # Retained for back-compat with the TUI; the new orchestrator always sets False.
-    is_handoff: bool = False
 
 
 class AgentRunning(_EventBase):
