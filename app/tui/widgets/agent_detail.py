@@ -94,12 +94,6 @@ class AgentDetailView(Vertical):
         self._append_log(agent_id, f"finished ({status})")
         self._refresh_if_focused(agent_id)
 
-    def trace_handoff(self, agent_id: str, to_role: str) -> None:
-        t = self._traces.setdefault(agent_id, _AgentTrace())
-        t.status = "handoff"
-        self._append_log(agent_id, f"handoff → {to_role}")
-        self._refresh_if_focused(agent_id)
-
     # ─── Focus control ──────────────────────────────────────────────────────
 
     def focus_agent(self, agent_id: str) -> None:
@@ -146,7 +140,6 @@ class AgentDetailView(Vertical):
             "running": "[#ffcc55]●[/#ffcc55] Running",
             "done":    "[#7eebdc]✓[/#7eebdc] Done",
             "error":   "[red]✗[/red] Error",
-            "handoff": "[magenta]↦[/magenta] Handed off",
             "idle":    "[dim]○ Idle[/dim]",
         }.get(t.status, "○ Idle")
         runtime = self._runtime(t)

@@ -592,7 +592,7 @@ class ToolExecutor:
             return _SANDBOX_UNAVAILABLE
         abs_path = await self.sandbox.write(path, content)
         # Artifact memory bridge — if the file lands under the artifacts dir,
-        # surface it via shared memory so handoff agents see the manifest.
+        # surface it via shared memory so later workers see the manifest.
         if abs_path.startswith(_ARTIFACTS_DIR + "/"):
             filename = os.path.basename(abs_path)
             ext = os.path.splitext(filename)[1].lstrip(".") or "file"

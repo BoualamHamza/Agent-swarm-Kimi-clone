@@ -91,7 +91,7 @@ async def test_spawn_then_run_then_complete_flow():
     events = [
         PhaseStart(phase="orchestrating"),
         OrchestratorReasoning(reasoning="testing"),
-        AgentSpawned(spec=spec, is_handoff=False),
+        AgentSpawned(spec=spec),
         PhaseStart(phase="executing"),
         AgentRunning(agent_id="x1"),
         ToolCallEvent(agent_id="x1", name="calculate", input={"expression": "1+1"}),
@@ -109,4 +109,4 @@ async def test_spawn_then_run_then_complete_flow():
         assert pill is not None
         assert pill.status == "done"
         assert app.swarm_computer.memory._rows.get("result") is not None
-        assert app.swarm_header._completed == 1
+        assert app.swarm_header.done == 1

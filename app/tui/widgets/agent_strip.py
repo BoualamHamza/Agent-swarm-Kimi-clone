@@ -1,12 +1,12 @@
 """AgentStrip — single horizontal line of compact agent pills.
 
-Replaces the bulky vertical AgentCard grid in v0.1. Each pill is one line:
+Each pill is one line:
 
     [● Hemingway] [● Barthes] [✓ Newton] [○ Shannon]
 
-State is conveyed via CSS classes (-running, -done, -error, -handoff) so the
-border / background of each pill colour-codes the agent's status. Clicking a
-pill focuses that agent in the main stage (Agent Focus mode).
+State is conveyed via CSS classes (-running, -done, -error) so the border /
+background of each pill colour-codes the agent's status. Clicking a pill
+focuses that agent in the main stage.
 """
 from __future__ import annotations
 
@@ -23,7 +23,6 @@ _STATUS_ICONS = {
     "running": "●",
     "done":    "✓",
     "error":   "✗",
-    "handoff": "↦",
 }
 
 
@@ -49,7 +48,7 @@ class AgentPill(Static):
         self._refresh_label()
 
     def watch_status(self, status: str) -> None:
-        for cls in ("-running", "-done", "-error", "-handoff"):
+        for cls in ("-running", "-done", "-error"):
             self.remove_class(cls)
         if status == "running":
             self.add_class("-running")
@@ -57,13 +56,6 @@ class AgentPill(Static):
             self.add_class("-done")
         elif status == "error":
             self.add_class("-error")
-        elif status == "handoff":
-            self.add_class("-handoff")
-        self._refresh_label()
-
-    def set_role_label(self, text: str) -> None:
-        """Append a handoff arrow ('↦ Tesla') without disturbing the pill."""
-        self.role = text
         self._refresh_label()
 
     def _refresh_label(self) -> None:
@@ -104,24 +96,3 @@ class AgentStrip(HorizontalScroll):
 
     def get_pill(self, agent_id: str) -> AgentPill | None:
         return self._pills.get(agent_id)
-
-    # ─── Handoff visualization ──────────────────────────────────────────────
-
-    def draw_handoff(self, from_id: str, to_id: str) -> None:
-        src = self.get_pill(from_id)
-        dst = self.get_pill(to_id)
-        if src is not None and dst is not None:
-            src.set_role_label(f"↦ {dst.character.name}")
-            dst.set_role_label(f"← {src.character.name}")
-
-    # ─── Compatibility shim ─────────────────────────────────────────────────
-    # Old call sites used grid.get_card(...) returning an AgentCard. We keep
-    # get_card as an alias so any straggler references keep working without a
-    # NoneType error.
-
-    def get_card(self, agent_id: str) -> AgentPill | None:
-        return self.get_pill(agent_id)
-
-    @property
-    def _cards(self) -> dict[str, AgentPill]:
-        return self._pills

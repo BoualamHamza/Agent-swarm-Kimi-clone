@@ -1,7 +1,7 @@
 """Async wrapper around a single shared `e2b.AsyncSandbox`.
 
-One `SwarmSandbox` is created per swarm run and shared across all workers
-(including handoff agents). All filesystem operations resolve relative paths
+One `SwarmSandbox` is created per swarm run and shared across all workers.
+All filesystem operations resolve relative paths
 against ``/home/user`` so agents can use short paths like
 ``workspace/data.csv`` and still hit the right place.
 

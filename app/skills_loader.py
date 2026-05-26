@@ -15,11 +15,6 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from importlib import resources
 from importlib.resources.abc import Traversable
-from typing import TYPE_CHECKING
-
-
-if TYPE_CHECKING:  # avoid circular import at module load
-    from app.sandbox import SwarmSandbox
 
 
 _FRONTMATTER_RE = re.compile(

@@ -21,8 +21,7 @@ def test_artifact_emitted_event_validates():
         size_bytes=1234,
     )
     assert ev.type == "artifact_emitted"
-    # Discriminated union must recognize it
-    from app.state import SwarmEvent  # noqa: F401  -- presence is enough
+    assert ev.model_dump()["type"] == "artifact_emitted"
 
 
 # ─── Harvest ────────────────────────────────────────────────────────────────

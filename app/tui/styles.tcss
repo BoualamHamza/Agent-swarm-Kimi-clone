@@ -94,7 +94,6 @@ ChatPane {
 .roster-row.-running { color: $warning; }
 .roster-row.-done    { color: $success; }
 .roster-row.-error   { color: $error;   }
-.roster-row.-handoff { color: $accent;  }
 
 /* Final answer */
 
@@ -162,9 +161,6 @@ SwarmComputer {
 }
 .agent-pill.-error {
     border: solid $error;
-}
-.agent-pill.-handoff {
-    border: solid $accent;
 }
 
 /* Tab bar */
@@ -275,7 +271,7 @@ SwarmComputer {
     background: $boost;
 }
 
-/* ─── Artifacts view (kept from v0.1, restyled) ───────────────────────── */
+/* ─── Artifacts view ───────────────────────────────────────────────────── */
 
 #artifacts-view {
     height: 1fr;
